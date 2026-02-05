@@ -39,7 +39,10 @@ jobs:
           - runner: ubuntu-latest
             target: ppc64le
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
+        with:
+          # Initialize Ruff submodule
+          submodules: recursive
       - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
@@ -52,7 +55,7 @@ jobs:
           manylinux: auto
           working-directory: ${{ env.PROJECT_DIR }}
       - name: Upload wheels
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-linux-${{ matrix.platform.target }}
           path: ${{ env.PROJECT_DIR }}/dist
@@ -71,7 +74,10 @@ jobs:
           - runner: ubuntu-latest
             target: armv7
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
+        with:
+          # Initialize Ruff submodule
+          submodules: recursive
       - uses: actions/setup-python@v6
         with:
           python-version: "3.14"
@@ -84,7 +90,7 @@ jobs:
           manylinux: musllinux_1_2
           working-directory: ${{ env.PROJECT_DIR }}
       - name: Upload wheels
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-musllinux-${{ matrix.platform.target }}
           path: ${{ env.PROJECT_DIR }}/dist
@@ -99,8 +105,37 @@ jobs:
           - runner: windows-latest
             target: x86
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v6
+        with:
+          # Initialize Ruff submodule
+          submodules: recursive
+      # Explicitly install all supported versions of Python on Windows.
+      # Otherwise, as of Jan 2026, if we installed only Python 3.14,
+      # then the Windows runner would NOT generate wheels for Python 3.8.
+      # See https://github.com/django-components/djc-core/issues/22
+      # And https://pypi.org/project/djc-core-html-parser/1.0.3/#files
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          architecture: ${{ matrix.platform.target }}
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          architecture: ${{ matrix.platform.target }}
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          architecture: ${{ matrix.platform.target }}
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          architecture: ${{ matrix.platform.target }}
+      - name: Setup Python 3.14
+        uses: actions/setup-python@v6
         with:
           python-version: "3.14"
           architecture: ${{ matrix.platform.target }}
@@ -112,7 +147,7 @@ jobs:
           sccache: "true"
           working-directory: ${{ env.PROJECT_DIR }}
       - name: Upload wheels
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-windows-${{ matrix.platform.target }}
           path: ${{ env.PROJECT_DIR }}/dist
@@ -122,13 +157,38 @@ jobs:
     strategy:
       matrix:
         platform:
-          - runner: macos-13
+          - runner: macos-15-intel
             target: x86_64
-          - runner: macos-14
+          - runner: macos-latest
             target: aarch64
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@v6
+        with:
+          # Initialize Ruff submodule
+          submodules: recursive
+      # Explicitly install all supported versions of Python on macOS.
+      # Otherwise, as of Jan 2026, if we installed only Python 3.14,
+      # then the macOS runner would NOT generate wheels for Python 3.8, 3.9, 3.10.
+      # See https://github.com/django-components/djc-core/issues/22
+      # And https://pypi.org/project/djc-core/1.1.0/#files
+      - name: Setup Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Setup Python 3.13
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Setup Python 3.14
+        uses: actions/setup-python@v6
         with:
           python-version: "3.14"
       - name: Build wheels
@@ -139,7 +199,7 @@ jobs:
           sccache: "true"
           working-directory: ${{ env.PROJECT_DIR }}
       - name: Upload wheels
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-macos-${{ matrix.platform.target }}
           path: ${{ env.PROJECT_DIR }}/dist
@@ -147,7 +207,10 @@ jobs:
   sdist:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
+        with:
+          # Initialize Ruff submodule
+          submodules: recursive
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
@@ -155,7 +218,7 @@ jobs:
           args: --out dist
           working-directory: ${{ env.PROJECT_DIR }}
       - name: Upload sdist
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: wheels-sdist
           path: ${{ env.PROJECT_DIR }}/dist
@@ -173,7 +236,7 @@ jobs:
       # Used to generate artifact attestation
       attestations: write
     steps:
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v7
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v3
         with:
