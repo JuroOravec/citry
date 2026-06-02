@@ -1,0 +1,389 @@
+// Citry Template Grammar - Vue/JSX-like HTML templating for Python
+//
+// ```html
+// <c-if c-cond="user">
+//   <c-user-card c-user="user" class="mb-4" c-class="'vip' if user.is_vip else ''">
+//     <p>Hello, {{ user.name | upper }}!</p>
+//     <a c-href="'/profile/' + str(user.id)">View Profile</a>
+//   </c-user-card>
+// </c-if>
+// <c-else>
+//   <p>Please log in</p>
+// </c-else>
+//
+// <c-for c-for="item in items">
+//   <li>{{ item.name }}</li>
+// </c-for>
+// <c-empty>
+//   <li>No items</li>
+// </c-empty>
+//
+// <c-raw>{{ not parsed }}</c-raw>  <!-- verbatim / unprocessed content -->
+// ```
+//
+// - `{{ expr }}` - Template expressions in text
+// - `c-*` attrs - Python expressions or nested templates (e.g. `c-href="/u/{{ id }}"`)
+// - `<c-if>/<c-elif>/<c-else>` - Conditionals
+// - `<c-for>/<c-empty>` - Iteration
+// - `<c-raw>` - Verbatim content
+// - `<c-*>` - User components
+//
+// =============================================================================
+// ## Pest Grammar Reference
+// See https://docs.rs/pest/latest/pest/#pest-the-elegant-parser
+// -  { ... }: None - Accept whitespace or comments within their expressions.
+//                    Create token pairs during parsing, error-reported.
+// - _{ ... }: Silent - Do not create token pairs during parsing, nor are they error-reported.
+// - @{ ... }: Atomic - Do not accept whitespace or comments within their expressions.
+//                      Any rules called by atomic rules do not generate token pairs.
+// - ${ ... }: Compound-atomic - Same as atomic, plus not forbidden from generating token pairs.
+// =============================================================================
+
+
+/////////////////////////////
+// TEMPLATE
+/////////////////////////////
+
+template = ${
+    template_element* ~ EOI
+}
+
+// Template elements in order of precedence (most specific first).
+// HTML comments must come before html_directive to handle them specially.
+// HTML directives and processing instructions must come before tags to prevent parsing their content.
+template_element = {
+    html_comment |
+    html_directive |
+    html_processing_instruction |
+    html_raw |
+    html_tag |
+    template_expression |
+    template_comment |
+    text
+}
+
+/////////////////////////////
+// HTML BUILDING BLOCKS (IGNORED)
+/////////////////////////////
+
+// HTML comments: <!-- ... -->
+// HTML comments are special - they should be:
+// 1. Added to the comments list
+// 2. Kept as text nodes (unlike template comments {# ... #} which are NOT kept as text)
+// Note: HTML comments cannot contain "--" except at the start/end boundaries
+html_comment = {
+    "<!--" ~ html_comment_content ~ "-->"
+}
+
+// Content inside HTML comment
+// Can contain any characters except the closing sequence "-->" 
+html_comment_content = @{
+    (!"-->" ~ ANY)*
+}
+
+// HTML directives: <!...>
+// This covers DOCTYPE declarations (<!DOCTYPE ...>), CDATA sections (<![CDATA[...]]>),
+// and any other <!...> structures (but NOT HTML comments, which are handled separately above).
+// Browsers treat all of these as comments (except DOCTYPE which is moved/removed).
+// We parse them all uniformly and preserve them in the template.
+html_directive = @{
+    "<!" ~ directive_content ~ ">"
+}
+
+// Content inside <!...> directive
+// Can be anything except the closing >
+directive_content = @{
+    (!">" ~ ANY)*
+}
+
+// Processing instructions: <?...?>
+// Browsers treat these as comments, converting them to <!--?lol?-->
+// We parse them uniformly and preserve them in the template.
+//
+// NOTE: Properly, a processing instruction should end with `?>`.
+// However, browsers like Chrome v142 actually ignore anything that STARTS with `<?`, irrespective
+// of the ending.
+// E.g. Chrome v142 handles `<?abc > def ?>` as `<!--?abc --> def ?`, so the part after
+// the first `>` is treated as a text.
+// Same happens also in:
+// - Firefox v145
+// - Safari v18.6
+html_processing_instruction = @{
+    "<?" ~ processing_instruction_content ~ ">"
+}
+
+// Content inside <?...?> processing instruction
+// Can be anything except the closing >
+processing_instruction_content = @{
+    (!">" ~ ANY)*
+}
+
+/////////////////////////////
+// HTML RAW TAG (<c-raw>)
+/////////////////////////////
+
+// Raw tag: <c-raw>...</c-raw>
+// Content between tags is treated as raw text, not parsed
+html_raw = {
+    html_raw_start_tag ~ html_raw_content ~ html_raw_end_tag
+}
+
+// Raw start tag: <c-raw ...>
+html_raw_start_tag = {
+    "<" ~ html_raw_tag_name ~ (spacing_with_whitespace ~ html_attribute)* ~ spacing* ~ ">"
+}
+
+// Raw end tag: </c-raw>
+//
+// NOTE: End tag CANNOT contain any attributes.
+// However, we recognize them in the grammar to allow for proper error reporting.
+html_raw_end_tag = {
+    "</" ~ html_raw_tag_name ~ (spacing_with_whitespace ~ html_attribute)* ~ spacing* ~ ">"
+}
+
+// Content inside <c-raw>...</c-raw>
+// Matches anything until we see </c-raw>
+html_raw_content = @{
+    (!html_raw_end_tag ~ ANY)*
+}
+
+html_raw_tag_name = @{
+    "c-raw"
+}
+
+/////////////////////////////
+// HTML TAGS
+/////////////////////////////
+
+// HTML Tags: <tag>, <tag/>, </tag>
+// This includes both regular HTML tags and component tags (e.g., <c-MyComp>)
+html_tag = {
+    html_start_tag |
+    html_end_tag |
+    html_self_closing_tag
+}
+
+// Start tag: <tag ...>
+html_start_tag = ${
+    "<" ~ html_tag_name ~ (spacing_with_whitespace ~ html_attribute)* ~ spacing* ~ ">"
+}
+
+// End tag: </tag>
+//
+// NOTE: End tag CANNOT contain any attributes.
+// However, we recognize them in the grammar to allow for proper error reporting.
+html_end_tag = ${
+    "</" ~ html_tag_name ~ (spacing_with_whitespace ~ html_attribute)* ~ spacing* ~ ">"
+}
+
+// Self-closing tag: <tag ... />
+html_self_closing_tag = ${
+    "<" ~ html_tag_name ~ (spacing_with_whitespace ~ html_attribute)* ~ spacing* ~ "/" ~ ">"
+}
+
+// HTML tag name (supports component tags like <a>, <c-MyComp>, <c:MyComp>, <MyComp>, etc.)
+//
+// This implementation is more strict than the HTML5 spec, so it matches browser behavior.
+//
+// According to the HTML5 tokenization spec, tag names can contain any character except
+// whitespace, `/`, and `>`. The tag name state continues until it hits one of:
+// - whitespace
+// - `/`
+// - `>`
+//
+// So in HTML5 spec, even these are valid tag names: `<1a>`, `<_a>`, `<:a>`, `<.a>`, `<;a>`, `<,a>`, etc.
+//
+// HOWEVER, tag names MUST start with an alphabet letter (a-zA-Z) in Chrome v142. Anything else
+// is treated as text (e.g. `<1a>` is treated as text, not as a tag name).
+//
+// Chrome is permissive for the characters AFTER the first letter. So `<a1_-:.,;>` is valid.
+//
+// We also exclude `{#` from tag names as it would start a template comment.
+html_tag_name = @{
+    ASCII_ALPHA ~
+    (!(WHITESPACE | "/" | ">" | ("{" ~ "#")) ~ ANY)*
+}
+
+// HTML attributes
+// Attributes can be:
+// - name="value"
+// - name='value'
+// - name (boolean attribute)
+// Value optional to support boolean attributes
+// E.g. `<div disabled>` is valid.
+html_attribute = {
+    html_attribute_name ~ html_attribute_value?
+}
+
+// Attribute name
+//
+// We allow any character except those that would naturally delimit an attribute name:
+// - whitespace (ends the attribute name)
+// - equals sign (`=`) (starts the attribute value)
+// - forward slash (`/`) (starts self-closing tag delimiter)
+// - greater than (`>`) (ends the tag)
+// - less than (`<`) (would start a new tag)
+// - `{#` (starts template comment)
+//
+// This allows attributes like `@change`, `v-model`, `:class`, `[style]`, `(click)`,
+// `'abc'`, `"key"`, `key[0]`, `_('hello')`, etc - This matches actual HTML parsing in Chrome v142.
+//
+// ---
+//
+// NOTE: This is more permissive than what browsers might allow.
+// E.g. In Chrome v142, this:
+// `<my-comp a="a\2" b 1b _c $d -e f-f :g  ;j ,k></my-comp>`
+//
+// got converted to
+//
+// `<my-comp a="a\2" b _c f-f :g></my-comp>`
+//
+// So it seems that following is NOT supported as **first** character in browsers:
+// - numeric
+// - dollar sign
+// - dash
+// - semicolon
+// - comma
+//
+// For the subequent characters, Chrome v142 is slightly more permissive, turning:
+// `<a a a1b a_c a$d a-e a.f a:g a;j a,k></a>`
+//
+// into:
+// `<a a a1b a_c a-e a.f a:g></a>`
+html_attribute_name = @{
+    (!(WHITESPACE | "=" | "/" | ">" | "<" | ("{" ~ "#")) ~ ANY)+
+}
+
+// Attribute value (quoted string)
+// NOTE: HTML spec, as well as Chrome v142, allow whitespace around the `=` sign.
+// <div class="foo">          <!-- no space -->
+// <div class= "foo">         <!-- space after = -->
+// <div class ="foo">         <!-- space before = -->
+// <div class = "foo">        <!-- space on both sides -->
+html_attribute_value = {
+    WHITESPACE* ~ "=" ~ WHITESPACE* ~ (
+        double_quoted_value |
+        single_quoted_value |
+        unquoted_value
+    )
+}
+
+// Double-quoted attribute value. Can contain any characters except `"`.
+double_quoted_value = @{
+    "\"" ~ (!"\"" ~ ANY)* ~ "\""
+}
+
+// Single-quoted attribute value. Can contain any characters except `'`.
+single_quoted_value = @{
+    "'" ~ (!"'" ~ ANY)* ~ "'"
+}
+
+// Unquoted attribute value (HTML5 allows this for certain cases)
+// Must not contain spaces, quotes, or certain special characters
+unquoted_value = @{
+    (!(WHITESPACE | "\"" | "'" | "=" | "<" | ">" | ("{" ~ "#")) ~ ANY)+
+}
+
+/////////////////////////////
+// EXPRESSIONS
+/////////////////////////////
+
+// Template expressions: {{ ... }}
+// NOTE: Only whitespace is allowed around the python expression, not template comments ({# #}),
+// because inside {{ ... }} we expect a python expression, not a template syntax.
+template_expression = ${
+    "{{" ~ WHITESPACE* ~ python_expr ~ WHITESPACE* ~ "}}"
+}
+
+/////////////////////////////
+// COMMENTS
+/////////////////////////////
+
+// Template comments: {# ... #}
+template_comment = @{
+    "{#" ~ template_comment_content ~ "#}"
+}
+
+// Content inside template comment
+// Can contain any characters except the closing sequence "#}" 
+template_comment_content = @{
+    (!"#}" ~ ANY)*
+}
+
+/////////////////////////////
+// TEXT CONTENT
+/////////////////////////////
+
+// Text is everything that's not a tag, expression, comment, or directive
+//
+// Uses negative lookahead to efficiently match until we hit a valid delimiter.
+// We only stop at `<` if it's followed by a valid tag/directive start character.
+// This allows text like `3<4` to be parsed correctly (the `<4` is just text).
+text = @{
+    (
+        !("<" ~ (ASCII_ALPHA | "/" | "!" | "?")) ~  // Not <tag, </endtag, <!directive, <?pi
+        !("{{") ~  // Not template expression
+        !("{#") ~  // Not template comment
+        ANY
+    )+
+}
+
+/////////////////////////////
+// VALUE SYSTEM (from V1 grammar)
+/////////////////////////////
+
+// Python expressions
+//
+// When considering the Python expression, we recognize string literals and nested curly braces.
+// We do this so that we can identify when the expression REALLY ends.
+//
+// Without this, we wouldn't be able to tell if `}}` is the end of expression
+// or just an end of 2 dicts.
+//
+// And naturally, we want to ignore `}}` inside string literals.
+python_expr = ${
+    (
+        python_str_triple_double |
+        python_str_triple_single |
+        python_str_double |
+        python_str_single |
+        python_nested_curly |
+        python_other_char
+    )*
+}
+
+// When we encounter a string literal, ignore everything inside it.
+python_str_triple_double = @{ "\"\"\"" ~ (!"\"\"\"" ~ ANY)* ~ "\"\"\"" }
+python_str_triple_single = @{ "'''" ~ (!"'''" ~ ANY)* ~ "'''" }
+python_str_double = @{ "\"" ~ (python_esc | !"\"" ~ ANY)* ~ "\"" }
+python_str_single = @{ "'" ~ (python_esc | !"'" ~ ANY)* ~ "'" }
+python_esc = _{ "\\" ~ ANY }
+// When we encounter a dict literal, the parser will expect it to be closed.
+// Unitl we close all curly braces, we cannot end the Python expression.
+// This way, even something like `{{ {"a": {1: 2}} }}` is valid.
+//
+// NOTE: We do NOT count parentheses `( ... )`. So while a Python expressions
+// MUST match the count of `{` and `}`, they don't have to match the count of `(` and `)`.
+python_nested_curly = _{ "{" ~ python_expr ~ "}" }
+python_other_char = { !"}" ~ !"{" ~ ANY }
+
+/////////////////////////////
+// UTILITIES
+/////////////////////////////
+
+// Spacing includes both whitespace and comments
+spacing = ${ WHITESPACE | template_comment }
+
+// Spacing that requires at least one WHITESPACE character
+// This ensures there's at least one whitespace between tag_name and attributes,
+// but allows any number of comments
+spacing_with_whitespace = ${
+    (template_comment* ~ WHITESPACE ~ template_comment*)+
+}
+
+// Whitespace
+// NOTE: This is silent (_{ }) which enables implicit whitespace matching between
+// sequence elements (~) in non-atomic rules. However, the html_tag rules are
+// non-atomic and DO have explicit spacing, so we need to handle this carefully.
+// The spacing_with_whitespace and spacing rules handle whitespace explicitly.
+WHITESPACE = _{ " " | "\t" | "\n" | "\r" }
