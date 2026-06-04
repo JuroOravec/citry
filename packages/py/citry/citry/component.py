@@ -5,6 +5,10 @@ A Component is a reusable unit of UI. It owns a template, optionally
 defines typed inputs (via inner classes), and produces rendered output
 through its lifecycle methods.
 
+Calling a Component class returns a RenderObject (composition phase),
+not a rendered string. Rendering happens when ``.render()`` is called
+on the RenderObject.
+
 Example:
     Minimal component::
 
@@ -15,6 +19,12 @@ Example:
 
             def template_data(self, kwargs):
                 return {"name": kwargs.get("name", "World")}
+
+        # Composition - returns a RenderObject
+        render_obj = Greeting(name="World")
+
+        # Rendering - produces HTML (not yet implemented)
+        # html = render_obj.render()
 
     Component with typed inputs::
 
@@ -38,6 +48,9 @@ Example:
                     "body": kwargs.body,
                 }
 
+        # Compose without rendering
+        card = Card(title="Hello", body="Content")
+
 """
 
 from __future__ import annotations
@@ -46,6 +59,7 @@ from dataclasses import dataclass, is_dataclass
 from typing import Any, ClassVar
 
 from citry.citry import Citry, citry
+from citry.render_object import RenderObject
 
 
 class ComponentMeta(type):
@@ -112,6 +126,38 @@ class ComponentMeta(type):
         citry_instance._register_component(cls)  # type: ignore[arg-type]
 
         return cls  # type: ignore[return-value]
+
+    def __call__(cls, **kwargs: Any) -> RenderObject:
+        """
+        Intercept ``MyComp(title="Hi")`` to return a RenderObject.
+
+        In citry, calling a Component class is the **composition** phase.
+        It creates a RenderObject that describes what to render, without
+        rendering it yet. Actual Component instances are created later
+        during the **rendering** phase via ``_create_instance()``.
+
+        This is analogous to React's ``<MyComp title="Hi" />`` producing
+        a RenderElement, not a rendered DOM node.
+        """
+        return RenderObject(cls, kwargs)  # type: ignore[arg-type]
+
+    def _create_instance(cls, **init_kwargs: Any) -> Component:
+        """
+        Create an actual Component instance (internal, for rendering).
+
+        Bypasses ``__call__`` (which returns a RenderObject) by going
+        through ``type.__call__`` directly. This is how the rendering
+        pipeline creates real Component instances with render-time state
+        (render_id, resolved context, etc.).
+
+        Not part of the public API.
+        """
+        # In Python, writing `MyClass()` calls `type(MyClass).__call__(MyClass)`,
+        # i.e. the metaclass's __call__. Our ComponentMeta.__call__ returns a
+        # RenderObject. To create an actual instance, we skip our metaclass and
+        # call type.__call__ directly, which is the base implementation that runs
+        # cls.__new__ + cls.__init__ and returns a real instance of cls.
+        return type.__call__(cls, **init_kwargs)  # type: ignore[return-value]
 
     def __del__(cls) -> None:
         citry_instance = getattr(cls, "citry", None)

@@ -2,7 +2,7 @@
 
 # ruff: noqa: ANN
 
-from citry import Component
+from citry import Component, RenderObject
 
 
 class TestComponentFields:
@@ -75,21 +75,72 @@ class TestComponentFields:
         assert hasattr(MyComp.Kwargs, "__slots__")
 
 
-class TestGetTemplateData:
+class TestComponentCall:
+    def test_calling_component_returns_render_object(self):
+        class MyComp(Component):
+            pass
+
+        result = MyComp(title="Hello")
+        assert isinstance(result, RenderObject)
+
+    def test_render_object_holds_class_and_kwargs(self):
+        class MyComp(Component):
+            pass
+
+        ro = MyComp(title="Hello", size=10)
+        assert ro.comp_cls is MyComp
+        assert ro.kwargs == {"title": "Hello", "size": 10}
+
+    def test_render_object_repr(self):
+        class MyComp(Component):
+            pass
+
+        ro = MyComp(title="Hello")
+        assert "MyComp" in repr(ro)
+        assert "title" in repr(ro)
+
+    def test_render_object_empty_kwargs(self):
+        class MyComp(Component):
+            pass
+
+        ro = MyComp()
+        assert ro.kwargs == {}
+        assert ro.slots == {}
+
+
+class TestCreateInstance:
+    def test_create_instance_returns_component(self):
+        class MyComp(Component):
+            pass
+
+        inst = MyComp._create_instance()
+        assert isinstance(inst, MyComp)
+        assert isinstance(inst, Component)
+
+    def test_create_instance_passes_init_kwargs(self):
+        class MyComp(Component):
+            def __init__(self, render_id=None):
+                self.render_id = render_id
+
+        inst = MyComp._create_instance(render_id="abc123")
+        assert inst.render_id == "abc123"
+
+
+class TestTemplateData:
     def test_default_returns_none(self):
         class MyComp(Component):
             pass
 
-        comp = MyComp()
-        assert comp.template_data(kwargs={}) is None
+        inst = MyComp._create_instance()
+        assert inst.template_data(kwargs={}) is None
 
     def test_override_returns_dict(self):
         class MyComp(Component):
             def template_data(self, kwargs, slots=None, context=None):
                 return {"greeting": f"Hello {kwargs['name']}!"}
 
-        comp = MyComp()
-        data = comp.template_data(kwargs={"name": "World"})
+        inst = MyComp._create_instance()
+        data = inst.template_data(kwargs={"name": "World"})
         assert data == {"greeting": "Hello World!"}
 
 
@@ -98,4 +149,5 @@ class TestComponentRepr:
         class MyComp(Component):
             pass
 
-        assert repr(MyComp()) == "<MyComp>"
+        inst = MyComp._create_instance()
+        assert repr(inst) == "<MyComp>"
