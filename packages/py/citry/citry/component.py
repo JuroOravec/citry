@@ -118,7 +118,11 @@ class ComponentMeta(type):
 
         cls = super().__new__(mcs, name, bases, attrs)
 
-        # Register with the Citry instance
+        # Register with the Citry instance.
+        # Uses the class name (or Component.name override) as the
+        # registration name. The Citry.register() method handles
+        # normalization (lowercasing, kebab-case derivation) and
+        # duplicate detection.
         citry_instance = getattr(cls, "citry", None)
         if citry_instance is None:
             citry_instance = citry
@@ -162,7 +166,10 @@ class ComponentMeta(type):
     def __del__(cls) -> None:
         citry_instance = getattr(cls, "citry", None)
         if citry_instance is not None:
-            citry_instance._unregister_component(cls)  # type: ignore[arg-type]
+            try:
+                citry_instance.unregister(cls)  # type: ignore[arg-type]
+            except Exception:  # noqa: BLE001
+                pass
 
 
 class Component(metaclass=ComponentMeta):
@@ -183,6 +190,17 @@ class Component(metaclass=ComponentMeta):
 
     Set this to assign the component to a specific Citry instance.
     If not set, the component is assigned to the default instance.
+    """
+
+    name: ClassVar[str | None] = None
+    """Override the name under which this component is registered.
+
+    By default, the class name is used (lowercased + kebab-case).
+    Set this to register under a specific name instead::
+
+        class MyWidget(Component):
+            name = "fancy-widget"
+            # registered as "fancy-widget", not "mywidget" / "my-widget"
     """
 
     template: ClassVar[str | None] = None

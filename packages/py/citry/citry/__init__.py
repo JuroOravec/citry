@@ -6,11 +6,18 @@
 #
 # For the Rust-powered parser and compiler, see citry_core.
 
-from citry.citry import Citry, citry
+from citry.citry import Citry
+from citry.citry import citry  # noqa: PLW0127
 from citry.component import Component
+from citry.component_registry import AlreadyRegistered, ComponentRegistry, NotRegistered
+from citry.render_object import RenderObject
 
 __all__ = [
+    "AlreadyRegistered",
     "Citry",
     "Component",
+    "ComponentRegistry",
+    "NotRegistered",
+    "RenderObject",
     "citry",
 ]
