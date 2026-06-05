@@ -40,7 +40,7 @@ def compile_template(
         Compile, then exec with stub node classes::
 
             from citry_core.template_parser import parse_template, compile_template
-            from citry_core.template_parser.nodes import (
+            from citry.nodes import (
                 ExprNode, ComponentNode, IfNode, ForNode,
                 SlotNode, FillNode, StaticHtmlAttr, ExprHtmlAttr,
                 TemplateHtmlAttr, TemplateNode,

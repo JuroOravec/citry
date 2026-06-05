@@ -5,9 +5,9 @@ A Component is a reusable unit of UI. It owns a template, optionally
 defines typed inputs (via inner classes), and produces rendered output
 through its lifecycle methods.
 
-Calling a Component class returns a RenderObject (composition phase),
+Calling a Component class returns a CitryElement (composition phase),
 not a rendered string. Rendering happens when ``.render()`` is called
-on the RenderObject.
+on the CitryElement.
 
 Example:
     Minimal component::
@@ -20,11 +20,11 @@ Example:
             def template_data(self, kwargs):
                 return {"name": kwargs.get("name", "World")}
 
-        # Composition - returns a RenderObject
-        render_obj = Greeting(name="World")
+        # Composition - returns a CitryElement
+        element = Greeting(name="World")
 
         # Rendering - produces HTML (not yet implemented)
-        # html = render_obj.render()
+        # html = element.render()
 
     Component with typed inputs::
 
@@ -56,10 +56,15 @@ Example:
 from __future__ import annotations
 
 from dataclasses import dataclass, is_dataclass
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from citry.citry import Citry, citry
-from citry.render_object import RenderObject
+from citry.citry_element import CitryElement
+from citry.component_render import gen_render_id
+from citry.util.misc import to_dict
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class ComponentMeta(type):
@@ -127,29 +132,29 @@ class ComponentMeta(type):
         if citry_instance is None:
             citry_instance = citry
             cls.citry = citry_instance  # type: ignore[attr-defined]
-        citry_instance._register_component(cls)  # type: ignore[arg-type]
+        citry_instance.register(cls)  # type: ignore[arg-type]
 
         return cls  # type: ignore[return-value]
 
-    def __call__(cls, **kwargs: Any) -> RenderObject:
+    def __call__(cls, **kwargs: Any) -> CitryElement:
         """
-        Intercept ``MyComp(title="Hi")`` to return a RenderObject.
+        Intercept ``MyComp(title="Hi")`` to return a CitryElement.
 
         In citry, calling a Component class is the **composition** phase.
-        It creates a RenderObject that describes what to render, without
+        It creates a CitryElement that describes what to render, without
         rendering it yet. Actual Component instances are created later
         during the **rendering** phase via ``_create_instance()``.
 
         This is analogous to React's ``<MyComp title="Hi" />`` producing
         a RenderElement, not a rendered DOM node.
         """
-        return RenderObject(cls, kwargs)  # type: ignore[arg-type]
+        return CitryElement(cls, kwargs)  # type: ignore[arg-type]
 
     def _create_instance(cls, **init_kwargs: Any) -> Component:
         """
         Create an actual Component instance (internal, for rendering).
 
-        Bypasses ``__call__`` (which returns a RenderObject) by going
+        Bypasses ``__call__`` (which returns a CitryElement) by going
         through ``type.__call__`` directly. This is how the rendering
         pipeline creates real Component instances with render-time state
         (render_id, resolved context, etc.).
@@ -158,7 +163,7 @@ class ComponentMeta(type):
         """
         # In Python, writing `MyClass()` calls `type(MyClass).__call__(MyClass)`,
         # i.e. the metaclass's __call__. Our ComponentMeta.__call__ returns a
-        # RenderObject. To create an actual instance, we skip our metaclass and
+        # CitryElement. To create an actual instance, we skip our metaclass and
         # call type.__call__ directly, which is the base implementation that runs
         # cls.__new__ + cls.__init__ and returns a real instance of cls.
         return type.__call__(cls, **init_kwargs)  # type: ignore[return-value]
@@ -226,6 +231,92 @@ class Component(metaclass=ComponentMeta):
 
     TemplateData: ClassVar[type | None] = None
     """Optional typed template data output."""
+
+    _template_body_generator: ClassVar[Callable[[], list[Any]] | None] = None
+    """Internal: the parsed+compiled body-generating function for this
+    component's template, built once per class on first render and cached
+    here (the Citry analog of Django's ``Component._template``). Calling it
+    yields a fresh node list. Populated and read via ``__dict__`` by the
+    render pipeline; not a user-facing field.
+    """
+
+    # ----- Instance fields -----
+    # Declared here for typing and documentation. Values are set in
+    # __init__, which is called by _render_impl via _create_instance().
+    # Not available during composition (MyComp() returns a CitryElement).
+
+    id: str
+    """Unique render ID for this component instance.
+
+    A fresh ID is minted every time a CitryElement is rendered, so the
+    same CitryElement rendered twice produces two distinct IDs.
+    """
+
+    kwargs: Any
+    """The resolved keyword arguments.
+
+    If the component defines a ``Kwargs`` dataclass, this is an instance
+    of that class. Otherwise, a plain dict.
+    """
+
+    raw_kwargs: dict[str, Any]
+    """The keyword arguments as a plain dict, even if a ``Kwargs``
+    dataclass is defined. Useful when you need dict access regardless
+    of typing.
+    """
+
+    slots: Any
+    """The resolved slot fills.
+
+    If the component defines a ``Slots`` dataclass, this is an instance
+    of that class. Otherwise, a plain dict.
+    """
+
+    raw_slots: dict[str, Any]
+    """The slot fills as a plain dict, even if a ``Slots`` dataclass
+    is defined. Useful when you need dict access regardless
+    of typing.
+    """
+
+    parent: Component | None
+    """The parent component instance, or None if this is a root component."""
+
+    root: Component
+    """The root component of the current render tree.
+
+    For root components, ``self.root is self``. Never None.
+    """
+
+    def __init__(
+        self,
+        id: str | None = None,
+        kwargs: Any = None,
+        slots: Any = None,
+        parent: Component | None = None,
+    ) -> None:
+        self.id = id if id is not None else gen_render_id()
+
+        cls = type(self)
+
+        # Normalize inputs to plain dicts. kwargs/slots may arrive as a dict,
+        # a NamedTuple, or a dataclass (e.g. a typed `Kwargs`/`Slots`
+        # instance), so run them through `to_dict`. The outer `dict(...)`
+        # copies, so mutations during one render never leak back into a
+        # CitryElement that may be rendered again.
+        raw_kwargs: dict[str, Any] = dict(to_dict(kwargs)) if kwargs is not None else {}
+        raw_slots: dict[str, Any] = dict(to_dict(slots)) if slots is not None else {}
+
+        # Set typed kwargs/slots if the component defines a dataclass,
+        # otherwise keep as plain dict.
+        self.kwargs = cls.Kwargs(**raw_kwargs) if cls.Kwargs is not None else raw_kwargs
+        self.slots = cls.Slots(**raw_slots) if cls.Slots is not None else raw_slots
+
+        # raw_ variants are always plain dicts
+        self.raw_kwargs = raw_kwargs
+        self.raw_slots = raw_slots
+
+        self.parent = parent
+        self.root = parent.root if parent is not None else self
 
     def template_data(
         self,

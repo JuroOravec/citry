@@ -16,18 +16,109 @@ from citry_core.template_parser import (
     compile_template,
     parse_template,
 )
-from citry_core.template_parser.nodes import (
-    ComponentNode,
-    ExprHtmlAttr,
-    ExprNode,
-    FillNode,
-    ForNode,
-    IfNode,
-    SlotNode,
-    StaticHtmlAttr,
-    TemplateHtmlAttr,
-    TemplateNode,
-)
+
+# =========================================================================
+# Dummy runtime node classes
+# =========================================================================
+#
+# The compiler emits source code that instantiates runtime node classes by
+# name. citry_core owns only the parser and compiler; the real node classes
+# live in the higher-level ``citry`` package, which depends on citry_core
+# (not the other way around). To keep these tests within citry_core's own
+# layer, we define minimal stand-ins here.
+#
+# Each constructor mirrors the exact argument order the compiler emits (the
+# compiler output is the contract). The stubs only capture those arguments as
+# attributes so the round-trip tests can assert on the resulting node tree.
+
+
+class ExprNode:
+    def __init__(self, source, position, expr, used_vars):
+        self.source = source
+        self.position = position
+        self.expr = expr
+        self.used_vars = used_vars
+
+
+class TemplateNode:
+    def __init__(self, source, position, expr, used_vars):
+        self.source = source
+        self.position = position
+        self.expr = expr
+        self.used_vars = used_vars
+
+
+class StaticHtmlAttr:
+    def __init__(self, source, position, key, value, used_vars):
+        self.source = source
+        self.position = position
+        self.key = key
+        self.value = value
+        self.used_vars = used_vars
+
+
+class ExprHtmlAttr:
+    def __init__(self, source, position, key, expr, used_vars):
+        self.source = source
+        self.position = position
+        self.key = key
+        self.expr = expr
+        self.used_vars = used_vars
+
+
+class TemplateHtmlAttr:
+    def __init__(self, source, position, key, template, used_vars):
+        self.source = source
+        self.position = position
+        self.key = key
+        self.template = template
+        self.used_vars = used_vars
+
+
+class ComponentNode:
+    def __init__(self, source, position, attrs, body, used_vars, name, contains_fills):
+        self.source = source
+        self.position = position
+        self.attrs = attrs
+        self.body = body
+        self.used_vars = used_vars
+        self.name = name
+        self.contains_fills = contains_fills
+
+
+class IfNode:
+    def __init__(self, source, branches, used_vars):
+        self.source = source
+        self.branches = branches
+        self.used_vars = used_vars
+
+
+class ForNode:
+    def __init__(self, source, branches, used_vars):
+        self.source = source
+        self.branches = branches
+        self.used_vars = used_vars
+
+
+class SlotNode:
+    def __init__(self, source, position, attrs, body, used_vars, introduced_vars):
+        self.source = source
+        self.position = position
+        self.attrs = attrs
+        self.body = body
+        self.used_vars = used_vars
+        self.introduced_vars = introduced_vars
+
+
+class FillNode:
+    def __init__(self, source, position, attrs, body, used_vars, introduced_vars):
+        self.source = source
+        self.position = position
+        self.attrs = attrs
+        self.body = body
+        self.used_vars = used_vars
+        self.introduced_vars = introduced_vars
+
 
 # =========================================================================
 # parse_template - basic parsing
@@ -75,9 +166,7 @@ class TestParseTemplate:
         assert len(t.elements) == 1
 
     def test_slot_and_fill(self):
-        t = parse_template(
-            '<c-Card><c-fill name="header">h</c-fill></c-Card>'
-        )
+        t = parse_template('<c-Card><c-fill name="header">h</c-fill></c-Card>')
         assert len(t.elements) == 1
         comp = t.elements[0]._0
         assert comp.contains_fills is True
@@ -205,22 +294,16 @@ class TestRoundTrip:
         assert len(body[0].branches) == 1
 
     def test_if_elif_else(self):
-        body = self._exec_template(
-            '<c-if cond="x">a</c-if><c-elif cond="y">b</c-elif><c-else>c</c-else>'
-        )
+        body = self._exec_template('<c-if cond="x">a</c-if><c-elif cond="y">b</c-elif><c-else>c</c-else>')
         assert isinstance(body[0], IfNode)
         assert len(body[0].branches) == 3
 
     def test_for_node(self):
-        body = self._exec_template(
-            '<c-for each="item in items">{{ item }}</c-for>'
-        )
+        body = self._exec_template('<c-for each="item in items">{{ item }}</c-for>')
         assert isinstance(body[0], ForNode)
 
     def test_for_with_empty(self):
-        body = self._exec_template(
-            '<c-for each="item in items">{{ item }}</c-for><c-empty>none</c-empty>'
-        )
+        body = self._exec_template('<c-for each="item in items">{{ item }}</c-for><c-empty>none</c-empty>')
         assert isinstance(body[0], ForNode)
         assert len(body[0].branches) == 2
 
@@ -229,9 +312,7 @@ class TestRoundTrip:
         assert isinstance(body[0], SlotNode)
 
     def test_fill_inside_component(self):
-        body = self._exec_template(
-            '<c-Card><c-fill name="header">h</c-fill></c-Card>'
-        )
+        body = self._exec_template('<c-Card><c-fill name="header">h</c-fill></c-Card>')
         comp = body[0]
         assert isinstance(comp, ComponentNode)
         assert comp.contains_fills is True

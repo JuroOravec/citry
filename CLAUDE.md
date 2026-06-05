@@ -176,6 +176,10 @@ relevant crate's `AGENTS.md`, then its `docs/agent/INDEX.md`, then
 - **Python:** `ruff` (line length 119, `select = ["ALL"]` with a curated
   ignore list) and `mypy` (strict for `citry_core.*`). Config in the root
   [`pyproject.toml`](pyproject.toml).
+- **Imports at the top, not inline.** Put imports in the standard place at
+  the top of the file. Only move an import inline (lazy) when there is a
+  concrete circular dependency or a measured issue. Do not defensively
+  lazy-import "just in case."
 - **Run checks repo-wide before declaring done.** Scoping a linter or test run
   to the files you touched is fine for iteration, but a final pass must run the
   way CI does (`cargo test`, `cargo clippy`, `cargo fmt --check`, `uv run ruff

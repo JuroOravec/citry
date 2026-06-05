@@ -1,16 +1,16 @@
 """
-RenderObject - the intermediate representation returned by Component().
+CitryElement - the intermediate representation returned by Component().
 
 When a user writes ``MyCard(title="Hello")``, they get back a
-RenderObject, not a rendered string and not a Component instance.
-The RenderObject holds the component class, kwargs, and slots,
+CitryElement, not a rendered string and not a Component instance.
+The CitryElement holds the component class, kwargs, and slots,
 and can be rendered later with ``.render()`` or ``str()``.
 
 This is analogous to React's RenderElement. The split between
-composition (creating the RenderObject) and rendering (calling
+composition (creating the CitryElement) and rendering (calling
 ``.render()``) enables:
 
-- Caching the RenderObject instead of a finished string (solves
+- Caching the CitryElement instead of a finished string (solves
   the frozen-ID and lost-variables problems from DJC #1650).
 - Passing render objects as values to other components or slots.
 - Different render targets (HTML string, streaming, etc.).
@@ -41,11 +41,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from citry.component_render import render_impl
+
 if TYPE_CHECKING:
     from citry.component import Component
 
 
-class RenderObject:
+class CitryElement:
     """
     Intermediate representation of a component invocation.
 
@@ -77,13 +79,10 @@ class RenderObject:
         Render this component to an HTML string.
 
         Each call mints fresh per-instance state (render_id, etc.),
-        so the same RenderObject can be rendered multiple times with
+        so the same CitryElement can be rendered multiple times with
         distinct identities.
         """
-        raise NotImplementedError(
-            "RenderObject.render() is not yet implemented. "
-            "The rendering pipeline is under construction."
-        )
+        return render_impl(self)
 
     def __str__(self) -> str:
         return self.render()

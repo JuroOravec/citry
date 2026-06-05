@@ -23,7 +23,7 @@ Quick start::
     #     return body
 
 The generated code instantiates runtime node classes (``ExprNode``,
-``ComponentNode``, etc.) defined in ``citry_core.template_parser.nodes``.
+``ComponentNode``, etc.) defined in ``citry.nodes``.
 See ``nodes.py`` for the full list and their constructor signatures.
 """
 
