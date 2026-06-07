@@ -368,8 +368,56 @@ class ComponentNode(Node):
         self.name = name
         self.contains_fills = contains_fills
 
-    def render(self, context: Any) -> str:
-        raise NotImplementedError("ComponentNode.render")
+    @override
+    def render(self, context: CitryContext) -> CitryRender:
+        """
+        Resolve attributes into kwargs, look up the child component, render it.
+
+        The child is a context boundary: it is rendered through ``render_impl``,
+        which mints the child its own ``CitryContext`` (fresh variables from the
+        child's ``template_data``). The returned ``CitryRender`` carries the
+        child's output; ``_render_body`` merges its dependencies into the parent.
+
+        Body content (default-slot text or ``<c-fill>`` nodes) is not handled
+        yet; the slot subsystem is a later phase with its own design.
+        """
+        # Imported lazily: component_render imports the node classes, so importing
+        # the render entry point at module load would be circular.
+        from citry.component_render import render_impl  # noqa: PLC0415
+
+        if self.body:
+            raise NotImplementedError(
+                f"<c-{self.name}> has body content (slots/fills), which is not yet "
+                "implemented. The slot subsystem is a later phase.",
+            )
+
+        component = context.component
+        if component is None or component.citry is None:
+            msg = "ComponentNode.render requires a component context bound to a Citry instance."
+            raise RuntimeError(msg)
+
+        kwargs = self._resolve_kwargs(context)
+        child_cls = component.citry.get(self.name)
+        element = CitryElement(child_cls, kwargs)
+        return render_impl(element, parent=component)
+
+    def _resolve_kwargs(self, context: CitryContext) -> dict[str, Any]:
+        """
+        Turn the attribute nodes into the child component's kwargs.
+
+        - ``c-bind="expr"`` is a spread: its evaluated mapping is merged in,
+          rather than producing a ``bind`` kwarg.
+        - Other dynamic attrs carry a leading ``c-`` (``c-foo`` -> ``foo``);
+          static attrs have a plain key. ``removeprefix`` handles both.
+        """
+        kwargs: dict[str, Any] = {}
+        for attr in self.attrs:
+            key: str = attr.key
+            if key == "c-bind":
+                kwargs.update(attr.resolve(context))
+            else:
+                kwargs[key.removeprefix("c-")] = attr.resolve(context)
+        return kwargs
 
     def __repr__(self) -> str:
         return f"ComponentNode(name={self.name!r}, attrs={len(self.attrs)}, body={len(self.body)} items)"
