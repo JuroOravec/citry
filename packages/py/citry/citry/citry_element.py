@@ -32,8 +32,10 @@ Example:
         card = Card(title="Hello")
         page = Page(content=card)
 
-        # Rendering phase - produces HTML
-        html = page.render()
+        # Rendering phase - produces a CitryRender, then serialize to HTML
+        rendered = page.render()        # -> CitryRender
+        html = rendered.serialize()     # -> str
+        # Or in one step with defaults: html = str(page)
 
 """
 
@@ -41,9 +43,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from citry.component_render import render_impl
-
 if TYPE_CHECKING:
+    from citry.citry_render import CitryRender
     from citry.component import Component
 
 
@@ -74,18 +75,29 @@ class CitryElement:
         self.kwargs = kwargs
         self.slots = slots or {}
 
-    def render(self) -> str:
+    def render(self) -> CitryRender:
         """
-        Render this component to an HTML string.
+        Render this component into a ``CitryRender``.
 
-        Each call mints fresh per-instance state (render_id, etc.),
-        so the same CitryElement can be rendered multiple times with
-        distinct identities.
+        Each call mints fresh per-instance state (render_id, etc.), so the same
+        CitryElement can be rendered multiple times with distinct identities.
+
+        Returns a ``CitryRender`` (the render-phase output), not a string. Call
+        ``.serialize()`` on it (or ``str()``) to get the HTML. ``str()`` on the
+        element itself runs the full chain with sensible defaults.
         """
+        # Imported lazily to break the import cycle: component_render imports the
+        # node classes, the nodes import CitryElement (for auto-rendering a
+        # composed element found in an expression), so CitryElement must not pull
+        # in component_render at module load.
+        from citry.component_render import render_impl  # noqa: PLC0415
+
         return render_impl(self)
 
     def __str__(self) -> str:
-        return self.render()
+        # Convenience: str(element) runs the full pipeline
+        # (render -> serialize) with default options.
+        return str(self.render())
 
     def __repr__(self) -> str:
         cls_name = self.comp_cls.__name__

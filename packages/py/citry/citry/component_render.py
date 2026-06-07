@@ -7,7 +7,13 @@ rendered (via ``.render()``), it calls ``render_impl`` which:
 1. Creates a real Component instance (via ``_create_instance``), which
    normalizes inputs and sets instance state (id, kwargs, slots, parent, root)
 2. Calls ``template_data()`` and validates it against ``TemplateData``
-3. Builds the template body (a node list) and renders it
+3. Builds a ``CitryContext`` (the render-scoped state) and the template body
+   (a node list), walks the body into a parts list, and returns a
+   ``CitryRender`` wrapping the parts plus the context
+
+``render_impl`` returns a ``CitryRender`` (not a string). Serialization to HTML
+happens later, via ``CitryRender.serialize()`` (or ``str()``). See
+docs/design/rendering.md for the three-phase model.
 
 The expensive step, the body-generating function (parse + compile + exec of
 the template), is built once per **component class** and cached on the class,
@@ -24,6 +30,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from citry.citry_context import CitryContext
+from citry.citry_render import CitryRender
 from citry.constants import COMP_ID_PREFIX, UID_LENGTH
 from citry.constness import const_value, is_const
 from citry.nodes import (
@@ -46,7 +54,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from citry.citry_element import CitryElement
+    from citry.citry_render import RenderPart
     from citry.component import Component
+    from citry.nodes import BodyItem
 
 
 _ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -65,13 +75,13 @@ def gen_render_id() -> str:
 def render_impl(
     element: CitryElement,
     parent: Component | None = None,
-) -> str:
+) -> CitryRender:
     """
     Core render implementation.
 
     This is the internal entry point called by ``CitryElement.render()``.
     It creates a real Component instance, calls the data methods, builds (or
-    reuses) the template body, and renders it.
+    reuses) the template body, and walks it into a ``CitryRender``.
 
     Args:
         element: The CitryElement to render. Carries the component class,
@@ -80,7 +90,9 @@ def render_impl(
             component's template. Used to set parent/root references.
 
     Returns:
-        The rendered HTML string.
+        A ``CitryRender`` holding the rendered parts and the ``CitryContext``
+        used during the render. Call ``.serialize()`` (or ``str()``) on it to
+        get the HTML string.
 
     """
     comp_cls = element.comp_cls
@@ -113,17 +125,26 @@ def render_impl(
     if template_data_cls is not None and not isinstance(maybe_data, template_data_cls):
         template_data_cls(**tpl_data)
 
-    # 3. Build the body (node list) and render it. The body-generating
-    #    function is parsed+compiled+exec'd once per component class (cached on
-    #    the class). The body is then loaded from the Citry-scoped cache keyed
-    #    by the component class plus the *const signature* (which context
-    #    variables are marked Const, and to what values). The body is NOT yet
-    #    specialized per signature (no folding), so every signature maps to an
-    #    equivalent node list for now; this wires up the const flow so folding
-    #    can slot in later. See docs/design/constness.md.
+    # 3. Build the render-scoped context. ``variables`` are the template
+    #    variables (the template_data output); ``extra`` is the tree-wide
+    #    scratch space extensions will populate (deps, etc.) - empty for now.
+    #    The Const markers stay in ``variables`` so they flow down to descendant
+    #    components, each of which can detect const-ness and cache accordingly.
+    #    Const is a transparent proxy, so nodes treat a const value exactly like
+    #    the underlying value.
+    context = CitryContext(variables=tpl_data, component=component)
+
+    # 4. Build the body (node list). The body-generating function is
+    #    parsed+compiled+exec'd once per component class (cached on the class).
+    #    The body is then loaded from the Citry-scoped cache keyed by the
+    #    component class plus the *const signature* (which context variables are
+    #    marked Const, and to what values). The body is NOT yet specialized per
+    #    signature (no folding), so every signature maps to an equivalent node
+    #    list for now; this wires up the const flow so folding can slot in
+    #    later. See docs/design/constness.md.
     generator = _get_body_generator(comp_cls)
     if generator is None:
-        return ""
+        return CitryRender(parts=[], context=context)
 
     signature = _const_signature(tpl_data)
     citry_instance = comp_cls.citry
@@ -132,15 +153,11 @@ def render_impl(
     else:
         body = generator()
 
-    # The Const markers stay in the context so they flow down to descendant
-    # components, each of which can detect const-ness and cache accordingly.
-    # Const is a transparent proxy, so nodes treat a const value exactly like
-    # the underlying value.
-    return _render_body(body, tpl_data)
+    # 5. Walk the body into a parts list and wrap it in a CitryRender.
+    parts = _render_body(body, context)
+    return CitryRender(parts=parts, context=context)
 
 
-# TODO - WRONG! Whether the template is inlined or in file,
-#        we should convert it to "Template" - NOT a string.
 def _get_template_string(comp_cls: type[Component]) -> str | None:
     """
     Resolve the component's template to a string.
@@ -153,7 +170,6 @@ def _get_template_string(comp_cls: type[Component]) -> str | None:
         return comp_cls.template
 
     if comp_cls.template_file is not None:
-        # TODO: Load template from file. For now, raise a clear error.
         raise NotImplementedError(
             f"Component {comp_cls.__name__} uses template_file={comp_cls.template_file!r}, "
             f"but file-based templates are not yet implemented."
@@ -162,7 +178,7 @@ def _get_template_string(comp_cls: type[Component]) -> str | None:
     return None
 
 
-def _get_body_generator(comp_cls: type[Component]) -> Callable[[], list[Any]] | None:
+def _get_body_generator(comp_cls: type[Component]) -> Callable[[], list[BodyItem]] | None:
     """
     Return the cached body-generating function for a component's template.
 
@@ -183,7 +199,7 @@ def _get_body_generator(comp_cls: type[Component]) -> Callable[[], list[Any]] | 
     return comp_cls.__dict__["_template_body_generator"]
 
 
-def _compile_body_generator(template_str: str) -> Callable[[], list[Any]]:
+def _compile_body_generator(template_str: str) -> Callable[[], list[BodyItem]]:
     """
     Parse, compile, and exec a template string into a body-generating function.
 
@@ -220,24 +236,48 @@ def _compile_body_generator(template_str: str) -> Callable[[], list[Any]]:
     return ns["generate_template"]
 
 
-def _render_body(body: list[Any], context: dict[str, Any]) -> str:
+def _render_body(body: list[BodyItem], context: CitryContext) -> list[RenderPart]:
     """
-    Render a body (list of static strings and node objects) to an HTML string.
+    Walk a body (list of static strings and node objects) into a parts list.
 
     Strings are static text and pass through unchanged. Node objects are
-    rendered with the per-render ``context``. (Nodes are currently stubs that
-    raise NotImplementedError on render, so for now they are repr'd.)
+    rendered with the render-scoped ``context``; each contributes a ``str`` or a
+    nested ``CitryRender`` to the parts.
+
+    When a node returns a ``CitryRender`` produced by a *different* render (an
+    embedded pre-rendered subtree, for example a value found in an expression),
+    its collected metadata is merged into this render's context. A
+    ``CitryRender`` carrying *this* context (for example a nested template, which
+    shares the surrounding component's context) needs no merge.
+
+    Returns a list of parts (``str`` or nested ``CitryRender``) for a
+    ``CitryRender`` to hold, rather than a joined string: joining is deferred to
+    ``CitryRender.serialize()`` so embedded subtrees stay composable.
     """
-    parts: list[str] = []
+    parts: list[RenderPart] = []
     for item in body:
         if isinstance(item, str):
             parts.append(item)
-        else:
-            # TODO: Call item.render(context) once nodes are implemented.
-            # For now, node objects are stubs, so we repr them.
-            parts.append(repr(item))
+            continue
+        part = item.render(context)
+        if isinstance(part, CitryRender) and part.context is not context:
+            _merge_dependencies(context, part.context)
+        parts.append(part)
 
-    return "".join(parts)
+    return parts
+
+
+def _merge_dependencies(into: CitryContext, source: CitryContext) -> None:
+    """
+    Merge an embedded subtree's collected metadata into the consuming context.
+
+    This is the seam for the JS/CSS dependency flow (docs/design/rendering.md
+    section 6): a pre-rendered subtree's dependencies must bubble up into the
+    tree that embeds it. No extension populates ``extra`` yet, so this is
+    currently a structural no-op; the dependency extension will define the merge
+    semantics (ordered de-duplication across the tree, not last-writer-wins).
+    """
+    into.extra.update(source.extra)
 
 
 def _const_signature(context: dict[str, Any]) -> frozenset[tuple[str, Any]]:
