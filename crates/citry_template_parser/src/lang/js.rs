@@ -1,5 +1,4 @@
-use crate::ast::Token;
-use crate::lang::lang::{LangImpl, LangSpecArgument, ParseExprResult};
+use crate::lang::lang::{ForLoopVars, LangImpl, LangSpecArgument, ParseExprResult};
 
 /// JavaScript/TypeScript language implementation
 ///
@@ -141,7 +140,7 @@ impl LangImpl for JsLang {
         Err("JavaScript/TypeScript expression parsing is not yet implemented".to_string())
     }
 
-    fn parse_forloop_expression(&self, _source: &str) -> Result<Vec<Token>, String> {
+    fn parse_forloop_variables(&self, _source: &str) -> Result<ForLoopVars, String> {
         // TODO: Implement JavaScript for-loop variable extraction
         //
         // Steps:

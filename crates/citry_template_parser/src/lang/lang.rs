@@ -50,6 +50,22 @@ pub struct ParseExprResult {
     pub comments: Vec<Comment>,
 }
 
+/// Result of analysing a for-loop clause (the `each` attribute in
+/// `<c-for each="...">`, or the `c-for=` shorthand).
+///
+/// Both halves come from one analysis of the same clause: `introduced` are the
+/// loop targets the clause binds, `used` are the free variables it reads from
+/// the surrounding scope. For `x in items`, `introduced` is `x` and `used` is
+/// `items`; for `x in xs for y in ys if x < z`, `introduced` is `x`, `y` and
+/// `used` is `xs`, `ys`, `z`.
+#[derive(Debug, Clone)]
+pub struct ForLoopVars {
+    /// Tokens for the loop target variables introduced into the body scope.
+    pub introduced: Vec<Token>,
+    /// Tokens for the free variables read by the iterable/condition clauses.
+    pub used: Vec<Token>,
+}
+
 /// Trait for language-specific expression parsing implementations
 pub trait LangImpl {
     /// Parse an expression string and return the AST along with variable usage information
@@ -62,23 +78,31 @@ pub trait LangImpl {
     /// * `Err(String)` - A string error message (will be converted to ParseError by caller)
     fn parse_expression(&self, source: &str) -> Result<ParseExprResult, String>;
 
-    /// Parse a for-loop expression (e.g., `each` attribute in `<c-for each="...">`)
+    /// Analyse a for-loop clause (the `each` attribute in `<c-for each="...">`,
+    /// or the `c-for=` shorthand) and return both its introduced and used
+    /// variables in one pass.
     ///
-    /// This extracts loop variables from the expression.
-    /// For Python, this handles comprehensions like `x, y, z in my_list`.
-    /// For PHP, this would handle `foreach` syntax like `foreach ($items as $x)`.
+    /// For Python this handles comprehension clauses like `x, y in my_list` or
+    /// `x in xs for y in ys if x < z`: the loop targets (`x`, `y`) are the
+    /// introduced variables, and the free variables of the iterable/condition
+    /// clauses (`my_list`; `xs`, `ys`, `z`) are the used variables. For PHP this
+    /// would handle `foreach` syntax like `foreach ($items as $x)`.
+    ///
+    /// Returning both halves together keeps them consistent (a target is never
+    /// also reported as used) and mirrors [`parse_expression`], which likewise
+    /// bundles its variable categories into one result.
     ///
     /// # Arguments
-    /// * `source` - The for-loop expression string (e.g., `"x, y, z in my_list"`)
+    /// * `source` - The for-loop clause string (e.g., `"x, y in my_list"`)
     ///
     /// # Returns
-    /// * `Ok(Vec<Token>)` - List of loop variable tokens with positions relative to the source string
+    /// * `Ok(ForLoopVars)` - The introduced and used variable tokens
     /// * `Err(String)` - A string error message (will be converted to ParseError by caller)
     ///
     /// # Note
     /// The returned tokens have positions relative to the `source` string.
     /// The caller is responsible for adjusting positions to match the template context.
-    fn parse_forloop_expression(&self, source: &str) -> Result<Vec<Token>, String>;
+    fn parse_forloop_variables(&self, source: &str) -> Result<ForLoopVars, String>;
 
     /// Compile a template AST into language-specific source code.
     ///

@@ -229,6 +229,24 @@ pub fn body_node(start_tag: HtmlStartTag, end_tag: HtmlEndTag, body: Template) -
     }
 }
 
+/// Build a Node::WithBody with used_variables (other fields default/empty).
+pub fn body_node_vars(
+    start_tag: HtmlStartTag,
+    end_tag: HtmlEndTag,
+    body: Template,
+    used_variables: Vec<Token>,
+) -> Node {
+    Node::WithBody {
+        start_tag,
+        end_tag,
+        body,
+        used_variables,
+        introduced_variables: vec![],
+        comments: vec![],
+        contains_fills: false,
+    }
+}
+
 /// Build a Node::WithBody with all fields explicit.
 #[allow(clippy::too_many_arguments)]
 pub fn body_node_full(
@@ -283,10 +301,7 @@ pub fn template(elements: Vec<TemplateElement>) -> Template {
 }
 
 /// Build a Template with used_variables.
-pub fn template_with_vars(
-    elements: Vec<TemplateElement>,
-    used_variables: Vec<Token>,
-) -> Template {
+pub fn template_with_vars(elements: Vec<TemplateElement>, used_variables: Vec<Token>) -> Template {
     Template {
         elements,
         comments: vec![],
@@ -296,10 +311,7 @@ pub fn template_with_vars(
 }
 
 /// Build a Template with comments.
-pub fn template_with_comments(
-    elements: Vec<TemplateElement>,
-    comments: Vec<Comment>,
-) -> Template {
+pub fn template_with_comments(elements: Vec<TemplateElement>, comments: Vec<Comment>) -> Template {
     Template {
         elements,
         comments,
@@ -384,10 +396,7 @@ pub fn expr_elem_with_comments(
 
 /// Build a Comment from token and value.
 pub fn comment(tok: Token, value: Token) -> Comment {
-    Comment {
-        token: tok,
-        value,
-    }
+    Comment { token: tok, value }
 }
 
 // =============================================================================

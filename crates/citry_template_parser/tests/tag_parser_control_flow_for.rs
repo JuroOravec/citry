@@ -7,8 +7,9 @@ mod tests {
     use citry_template_parser::parser::parse_template;
 
     use super::common::{
-        assert_parse_error, body_node_full, end_tag, expr_elem, node_elem, self_closing_node_full,
-        start_tag, static_attr, template, template_with_vars, token,
+        assert_parse_error, body_node_full, end_tag, expr_attr, expr_elem, node_elem,
+        self_closing_node_full, start_tag, static_attr, template, template_with_vars, token,
+        with_used_vars,
     };
 
     #[test]
@@ -22,56 +23,60 @@ mod tests {
         let input = r#"<c-for each="item in items"><li>{{ item }}</li></c-for>"#;
         let result = parse_template(input, None, None).unwrap();
 
-        let expected = template(vec![node_elem(body_node_full(
-            start_tag(
-                token(r#"<c-for each="item in items">"#, 0, 1, 1),
-                token("c-for", 1, 1, 2),
-                vec![static_attr(
-                    token("each", 7, 1, 8),
-                    token("item in items", 13, 1, 14),
-                )],
-                false,
-            ),
-            end_tag(token("</c-for>", 47, 1, 48), token("c-for", 49, 1, 50)),
-            // c-for body
-            template_with_vars(
-                vec![node_elem(body_node_full(
-                    start_tag(
-                        token("<li>", 28, 1, 29),
-                        token("li", 29, 1, 30),
-                        vec![],
-                        false,
-                    ),
-                    end_tag(token("</li>", 42, 1, 43), token("li", 44, 1, 45)),
-                    // li body
-                    template_with_vars(
-                        vec![expr_elem(
-                            token("{{ item }}", 32, 1, 33),
-                            token("item ", 35, 1, 36),
-                            vec![token("item", 35, 1, 36)],
-                        )],
-                        vec![token("item", 35, 1, 36)],
-                    ),
-                    // li used_variables
-                    vec![token("item", 35, 1, 36)],
-                    // li introduced_variables
-                    vec![],
-                    // li comments
-                    vec![],
-                    // li contains_fills
+        let expected = template_with_vars(
+            vec![node_elem(body_node_full(
+                start_tag(
+                    token(r#"<c-for each="item in items">"#, 0, 1, 1),
+                    token("c-for", 1, 1, 2),
+                    vec![with_used_vars(
+                        expr_attr(token("each", 7, 1, 8), token("item in items", 13, 1, 14)),
+                        vec![token("items", 21, 1, 22)],
+                    )],
                     false,
-                ))],
-                vec![token("item", 35, 1, 36)],
-            ),
-            // c-for used_variables: empty (item is introduced, items not tracked on attr)
-            vec![],
-            // c-for introduced_variables
-            vec![token("item", 13, 1, 14)],
-            // c-for comments
-            vec![],
-            // c-for contains_fills
-            false,
-        ))]);
+                ),
+                end_tag(token("</c-for>", 47, 1, 48), token("c-for", 49, 1, 50)),
+                // c-for body
+                template_with_vars(
+                    vec![node_elem(body_node_full(
+                        start_tag(
+                            token("<li>", 28, 1, 29),
+                            token("li", 29, 1, 30),
+                            vec![],
+                            false,
+                        ),
+                        end_tag(token("</li>", 42, 1, 43), token("li", 44, 1, 45)),
+                        // li body
+                        template_with_vars(
+                            vec![expr_elem(
+                                token("{{ item }}", 32, 1, 33),
+                                token("item ", 35, 1, 36),
+                                vec![token("item", 35, 1, 36)],
+                            )],
+                            vec![token("item", 35, 1, 36)],
+                        ),
+                        // li used_variables
+                        vec![token("item", 35, 1, 36)],
+                        // li introduced_variables
+                        vec![],
+                        // li comments
+                        vec![],
+                        // li contains_fills
+                        false,
+                    ))],
+                    vec![token("item", 35, 1, 36)],
+                ),
+                // c-for used_variables: `items` from the `each` clause (`item` is
+                // introduced by the loop and removed).
+                vec![token("items", 21, 1, 22)],
+                // c-for introduced_variables
+                vec![token("item", 13, 1, 14)],
+                // c-for comments
+                vec![],
+                // c-for contains_fills
+                false,
+            ))],
+            vec![token("items", 21, 1, 22)],
+        );
 
         assert_eq!(result, expected);
 
@@ -81,8 +86,7 @@ mod tests {
         // Input: <c-for each="item in items"><li>{{ item }}{{ outer_var }}</li></c-for>
         //        0         1         2         3         4         5         6
         //        0123456789012345678901234567890123456789012345678901234567890123456789
-        let input =
-            r#"<c-for each="item in items"><li>{{ item }}{{ outer_var }}</li></c-for>"#;
+        let input = r#"<c-for each="item in items"><li>{{ item }}{{ outer_var }}</li></c-for>"#;
         let result = parse_template(input, None, None).unwrap();
 
         let expected = template_with_vars(
@@ -90,9 +94,9 @@ mod tests {
                 start_tag(
                     token(r#"<c-for each="item in items">"#, 0, 1, 1),
                     token("c-for", 1, 1, 2),
-                    vec![static_attr(
-                        token("each", 7, 1, 8),
-                        token("item in items", 13, 1, 14),
+                    vec![with_used_vars(
+                        expr_attr(token("each", 7, 1, 8), token("item in items", 13, 1, 14)),
+                        vec![token("items", 21, 1, 22)],
                     )],
                     false,
                 ),
@@ -134,8 +138,9 @@ mod tests {
                     ))],
                     vec![token("item", 35, 1, 36), token("outer_var", 45, 1, 46)],
                 ),
-                // c-for used_variables: only outer_var (item is introduced and removed)
-                vec![token("outer_var", 45, 1, 46)],
+                // c-for used_variables: outer_var (from the body) and items (from
+                // the `each` clause); item is introduced by the loop and removed.
+                vec![token("outer_var", 45, 1, 46), token("items", 21, 1, 22)],
                 // c-for introduced_variables
                 vec![token("item", 13, 1, 14)],
                 // c-for comments
@@ -143,7 +148,7 @@ mod tests {
                 // c-for contains_fills
                 false,
             ))],
-            vec![token("outer_var", 45, 1, 46)],
+            vec![token("outer_var", 45, 1, 46), token("items", 21, 1, 22)],
         );
 
         assert_eq!(result, expected);
@@ -158,10 +163,7 @@ mod tests {
 
     #[test]
     fn test_c_empty_without_c_for() {
-        assert_parse_error(
-            "<c-empty><p>No items</p></c-empty>",
-            "must follow one of",
-        );
+        assert_parse_error("<c-empty><p>No items</p></c-empty>", "must follow one of");
     }
 
     #[test]
@@ -187,10 +189,7 @@ mod tests {
 
     #[test]
     fn test_c_for_each_boolean() {
-        assert_parse_error(
-            "<c-for each><li>item</li></c-for>",
-            "must have a value",
-        );
+        assert_parse_error("<c-for each><li>item</li></c-for>", "must have a value");
     }
 
     #[test]
@@ -406,25 +405,28 @@ mod tests {
         let input = r#"<c-for each="x in y" />"#;
         let result = parse_template(input, None, None).unwrap();
 
-        let expected = template(vec![node_elem(self_closing_node_full(
-            start_tag(
-                token(r#"<c-for each="x in y" />"#, 0, 1, 1),
-                token("c-for", 1, 1, 2),
-                vec![static_attr(
-                    token("each", 7, 1, 8),
-                    token("x in y", 13, 1, 14),
-                )],
-                true,
-            ),
-            // used_variables
-            vec![],
-            // introduced_variables
-            vec![token("x", 13, 1, 14)],
-            // comments
-            vec![],
-            // contains_fills
-            false,
-        ))]);
+        let expected = template_with_vars(
+            vec![node_elem(self_closing_node_full(
+                start_tag(
+                    token(r#"<c-for each="x in y" />"#, 0, 1, 1),
+                    token("c-for", 1, 1, 2),
+                    vec![with_used_vars(
+                        expr_attr(token("each", 7, 1, 8), token("x in y", 13, 1, 14)),
+                        vec![token("y", 18, 1, 19)],
+                    )],
+                    true,
+                ),
+                // used_variables: `y` from the `each` clause (`x` is the loop target)
+                vec![token("y", 18, 1, 19)],
+                // introduced_variables
+                vec![token("x", 13, 1, 14)],
+                // comments
+                vec![],
+                // contains_fills
+                false,
+            ))],
+            vec![token("y", 18, 1, 19)],
+        );
 
         assert_eq!(result, expected);
     }

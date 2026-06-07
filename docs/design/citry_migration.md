@@ -93,11 +93,17 @@ designed. Grouped by which part of the architecture they impact.
 
 | Issue | Feature | Architecture impact |
 |---|---|---|
-| [#1650](https://github.com/django-components/django-components/issues/1650) | `Component()` returns a `CitryElement`, not a string | Render output is not `str` but a tree object. Nodes produce `CitryElement`, not `str`. Cache stores objects. |
+| [#1650](https://github.com/django-components/django-components/issues/1650) | `Component()` returns a `CitryElement`, not a string | Three-phase pipeline: `Component()` composes a `CitryElement`; `.render()` produces a `CitryRender` (rendered parts + collected metadata); `.serialize()` produces the HTML string. The render output is a struct so JS/CSS deps travel as data, not as marker strings. Cache stores objects. Full design in [`rendering.md`](rendering.md). |
 | [#1083](https://github.com/django-components/django-components/issues/1083) | `Const()` marker for 50% perf gain | Nodes detect constant inputs and replace themselves with static text. Rendering context must track constness. |
 | [#1473](https://github.com/django-components/django-components/issues/1473) | Expression caching | Variable tracking (already in AST) enables memoizing expression results across renders when inputs are unchanged. |
 | [#1337](https://github.com/django-components/django-components/issues/1337) | Lazy/streaming rendering | Rendering may be deferred; components produce futures or generators instead of synchronous strings. |
 | [#1326](https://github.com/django-components/django-components/issues/1326) | Avoid double-parsing component body | Template parsing should be cached at the class level, not re-parsed per render. |
+
+The render-output model (the three-phase `CitryElement` -> `CitryRender` ->
+HTML pipeline, the `CitryContext` render-scoped state, and the JS/CSS dependency
+flow that drives the struct shape) is captured separately in
+[`rendering.md`](rendering.md). It is designed but not yet built: the current
+skeleton still returns a `str` from `render_impl`.
 
 The `Const()` (#1083), expression-caching (#1473), and render-body-caching
 design (and its many edge cases) is captured separately in
@@ -393,6 +399,11 @@ test isolation infrastructure (the equivalent of django-components'
 
 - `packages/py/citry/tests/test_citry.py`
 - `packages/py/citry/tests/test_component.py`
+- `packages/py/citry/tests/test_component_registry.py`
+- `packages/py/citry/tests/test_const.py`
+- `packages/py/citry/tests/test_render.py`
+- `packages/py/citry/tests/test_nodes.py`
+- `packages/py/citry/tests/test_component_node.py`
 
 ### Citry global instance (`citry/citry.py`)
 
@@ -516,6 +527,13 @@ class Card(Component):
 Holds the component class, kwargs, and slots. Rendering is deferred
 until `.render()` is called.
 
+> **Render-output model (see [`rendering.md`](rendering.md) and the "Render
+> output" entry below).** `.render()` returns a `CitryRender` (a distinct
+> render-phase struct carrying rendered parts plus an `extra` bag for metadata
+> such as JS/CSS dependencies), and `CitryRender.serialize()` produces the HTML
+> string. `str(element)` is a convenience that runs the full chain with
+> defaults.
+
 **Why:** In DJC, `Component.render()` returns a finished HTML string.
 This has problems (DJC #1650): cached strings carry frozen per-instance
 IDs and stale JS/CSS variable hashes that break on replay. The fix is
@@ -543,11 +561,13 @@ creates a description of what to render, not the rendered output.
   available without learning the full Component instance API. The
   `context` parameter will likely become internal.
 - **`.render()` delegates to the render pipeline.** It calls
-  `render_impl(self)` (see the render pipeline entry below). The pipeline is a
-  skeleton and the runtime nodes are still stubs.
-- **`str(element)` calls `.render()`.** CitryElements can be
-  embedded in f-strings or string concatenation and will render
-  transparently.
+  `render_impl(self)` (see the render pipeline entry below) and returns a
+  `CitryRender`. The pipeline is a skeleton; the value, attribute, component, and
+  control-flow nodes render, while slot nodes are a later phase.
+- **`str(element)` renders and serializes.** `str(element)` calls
+  `str(self.render())`, i.e. it runs the full pipeline (render then serialize)
+  with defaults, so CitryElements can be embedded in f-strings or string
+  concatenation and render transparently.
 
 **Usage:**
 
@@ -569,8 +589,9 @@ class Page(Component):
 
 page = Page(content=card)
 
-# Rendering phase (skeleton; runtime nodes are still stubs)
-# html = page.render()
+# Rendering phase: render() -> CitryRender, serialize() -> HTML
+# (str(page) runs both with defaults).
+html = page.render().serialize()
 ```
 
 ### Component registry (on `Citry` class)
@@ -703,11 +724,13 @@ rendering, JS/CSS media, provide/inject) are not yet ported.
   `template_data()` output is validated by constructing `TemplateData(**data)`,
   which raises on a missing or unexpected field. Skipped when `template_data()`
   already returned a `TemplateData` instance.
-- **Runtime nodes are still stubs.** The compiled code instantiates the node
-  classes (`ExprNode`, `ComponentNode`, etc.), which currently store their
-  arguments and raise `NotImplementedError` on `render`. So a static template
-  renders to its coalesced text; dynamic nodes are `repr`'d as placeholders
-  until the nodes are implemented.
+- **Node rendering status.** The value nodes (`ExprNode`, `TemplateNode`), the
+  attribute nodes, `ComponentNode`, and the control-flow nodes (`IfNode`,
+  `ForNode`) are implemented (see the entries below); the slot nodes (`SlotNode`,
+  `FillNode`) still raise `NotImplementedError` on `render` and are a later
+  phase. `_render_body` calls each node's `render(context)`; when a node returns
+  a `CitryRender` from a different context, it merges that render's dependencies
+  into the current context (the seam where the dependency extension will hook).
 
 **Usage:**
 
@@ -717,8 +740,9 @@ from citry import Component
 class Hello(Component):
     template = "<p>Hello!</p>"
 
-# A static template renders to its text (no dynamic nodes involved).
-assert Hello().render() == "<p>Hello!</p>"
+# render() returns a CitryRender; serialize() (or str()) produces the HTML.
+assert Hello().render().serialize() == "<p>Hello!</p>"
+assert str(Hello()) == "<p>Hello!</p>"  # convenience: render + serialize
 ```
 
 ### Const flow, skeleton (`citry/constness.py`, render pipeline, `Citry`)

@@ -7,8 +7,8 @@ mod tests {
     use citry_template_parser::parser::parse_template;
 
     use super::common::{
-        expr_attr, expr_attr_unquoted, node_elem, self_closing_node_vars, start_tag,
-        template_attr, template_with_vars, token, with_used_vars,
+        expr_attr, expr_attr_unquoted, node_elem, self_closing_node_vars, start_tag, template_attr,
+        template_with_vars, token, with_used_vars,
     };
 
     #[test]
@@ -27,10 +27,7 @@ mod tests {
                     token(r#"<c-my-tag c-class="is_active" />"#, 0, 1, 1),
                     token("c-my-tag", 1, 1, 2),
                     vec![with_used_vars(
-                        expr_attr(
-                            token("c-class", 10, 1, 11),
-                            token("is_active", 19, 1, 20),
-                        ),
+                        expr_attr(token("c-class", 10, 1, 11), token("is_active", 19, 1, 20)),
                         vec![is_active_var.clone()],
                     )],
                     true,
@@ -90,12 +87,7 @@ mod tests {
         let expected = template_with_vars(
             vec![node_elem(self_closing_node_vars(
                 start_tag(
-                    token(
-                        r#"<c-my-tag c-title="<span>{{ name }}</span>" />"#,
-                        0,
-                        1,
-                        1,
-                    ),
+                    token(r#"<c-my-tag c-title="<span>{{ name }}</span>" />"#, 0, 1, 1),
                     token("c-my-tag", 1, 1, 2),
                     vec![with_used_vars(
                         template_attr(

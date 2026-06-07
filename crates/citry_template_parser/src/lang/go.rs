@@ -1,5 +1,4 @@
-use crate::ast::Token;
-use crate::lang::lang::{LangImpl, LangSpecArgument, ParseExprResult};
+use crate::lang::lang::{ForLoopVars, LangImpl, LangSpecArgument, ParseExprResult};
 
 /// Go language implementation
 ///
@@ -250,7 +249,7 @@ impl LangImpl for GoLang {
         Err("Go expression parsing is not yet implemented. Expressions use Expr or CEL-Go syntax, not raw Go code.".to_string())
     }
 
-    fn parse_forloop_expression(&self, _source: &str) -> Result<Vec<Token>, String> {
+    fn parse_forloop_variables(&self, _source: &str) -> Result<ForLoopVars, String> {
         // TODO: Implement Go for-loop variable extraction
         //
         // Steps:

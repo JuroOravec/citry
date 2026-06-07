@@ -66,6 +66,8 @@ from citry.util.misc import to_dict
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from citry.nodes import BodyItem
+
 
 class ComponentMeta(type):
     """
@@ -136,9 +138,14 @@ class ComponentMeta(type):
 
         return cls  # type: ignore[return-value]
 
-    def __call__(cls, **kwargs: Any) -> CitryElement:
+    def __call__(cls, /, **kwargs: Any) -> CitryElement:
         """
         Intercept ``MyComp(title="Hi")`` to return a CitryElement.
+
+        ``cls`` is positional-only (``/``) so a component may take a keyword
+        argument named ``cls`` (for example an HTML ``class`` passed as
+        ``MyComp(cls="card")``) without colliding with the metaclass's own
+        first parameter.
 
         In citry, calling a Component class is the **composition** phase.
         It creates a CitryElement that describes what to render, without
@@ -232,7 +239,7 @@ class Component(metaclass=ComponentMeta):
     TemplateData: ClassVar[type | None] = None
     """Optional typed template data output."""
 
-    _template_body_generator: ClassVar[Callable[[], list[Any]] | None] = None
+    _template_body_generator: ClassVar[Callable[[], list[BodyItem]] | None] = None
     """Internal: the parsed+compiled body-generating function for this
     component's template, built once per class on first render and cached
     here (the Citry analog of Django's ``Component._template``). Calling it

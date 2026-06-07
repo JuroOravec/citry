@@ -76,10 +76,7 @@ mod tests {
             vec![
                 static_attr(token(":key", 10, 1, 11), token("v1", 16, 1, 17)),
                 static_attr(token(".key", 20, 1, 21), token("v2", 26, 1, 27)),
-                static_attr(
-                    token("@click.stop", 30, 1, 31),
-                    token("handler", 43, 1, 44),
-                ),
+                static_attr(token("@click.stop", 30, 1, 31), token("handler", 43, 1, 44)),
                 static_attr(token("attr:key", 52, 1, 53), token("val", 62, 1, 63)),
             ],
             true,
@@ -126,10 +123,7 @@ mod tests {
         let expected = template(vec![node_elem(self_closing_node(start_tag(
             token(r#"<c-my-tag key="" />"#, 0, 1, 1),
             token("c-my-tag", 1, 1, 2),
-            vec![static_attr(
-                token("key", 10, 1, 11),
-                token("", 15, 1, 16),
-            )],
+            vec![static_attr(token("key", 10, 1, 11), token("", 15, 1, 16))],
             true,
         )))]);
         assert_eq!(actual, expected);

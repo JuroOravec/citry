@@ -25,10 +25,7 @@ mod tests {
                 vec![],
                 false,
             ),
-            end_tag(
-                token("</div>", 5, 1, 6),
-                token("div", 7, 1, 8),
-            ),
+            end_tag(token("</div>", 5, 1, 6), token("div", 7, 1, 8)),
             template(vec![]),
         ))]);
 
@@ -103,18 +100,12 @@ mod tests {
                     token(r#"<div c-class="active">"#, 0, 1, 1),
                     token("div", 1, 1, 2),
                     vec![with_used_vars(
-                        expr_attr(
-                            token("c-class", 5, 1, 6),
-                            token("active", 14, 1, 15),
-                        ),
+                        expr_attr(token("c-class", 5, 1, 6), token("active", 14, 1, 15)),
                         vec![token("active", 14, 1, 15)],
                     )],
                     false,
                 ),
-                end_tag(
-                    token("</div>", 22, 1, 23),
-                    token("div", 24, 1, 25),
-                ),
+                end_tag(token("</div>", 22, 1, 23), token("div", 24, 1, 25)),
                 template(vec![]),
                 vec![token("active", 14, 1, 15)],
                 vec![],
@@ -141,18 +132,12 @@ mod tests {
                     token(r#"<div c-bind="props">"#, 0, 1, 1),
                     token("div", 1, 1, 2),
                     vec![with_used_vars(
-                        expr_attr(
-                            token("c-bind", 5, 1, 6),
-                            token("props", 13, 1, 14),
-                        ),
+                        expr_attr(token("c-bind", 5, 1, 6), token("props", 13, 1, 14)),
                         vec![token("props", 13, 1, 14)],
                     )],
                     false,
                 ),
-                end_tag(
-                    token("</div>", 20, 1, 21),
-                    token("div", 22, 1, 23),
-                ),
+                end_tag(token("</div>", 20, 1, 21), token("div", 22, 1, 23)),
                 template(vec![]),
                 vec![token("props", 13, 1, 14)],
                 vec![],
@@ -183,10 +168,7 @@ mod tests {
                 )],
                 false,
             ),
-            end_tag(
-                token("</div>", 31, 1, 32),
-                token("div", 33, 1, 34),
-            ),
+            end_tag(token("</div>", 31, 1, 32), token("div", 33, 1, 34)),
             template(vec![]),
         ))]);
 

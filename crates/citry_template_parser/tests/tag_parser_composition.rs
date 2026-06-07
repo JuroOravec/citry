@@ -25,10 +25,7 @@ mod tests {
                 vec![],
                 false,
             ),
-            end_tag(
-                token("</c-outer>", 20, 1, 21),
-                token("c-outer", 22, 1, 23),
-            ),
+            end_tag(token("</c-outer>", 20, 1, 21), token("c-outer", 22, 1, 23)),
             template(vec![node_elem(self_closing_node(start_tag(
                 token("<c-inner />", 9, 1, 10),
                 token("c-inner", 10, 1, 11),
@@ -54,18 +51,10 @@ mod tests {
                 vec![],
                 false,
             ),
-            end_tag(
-                token("</c-card>", 36, 1, 37),
-                token("c-card", 38, 1, 39),
-            ),
+            end_tag(token("</c-card>", 36, 1, 37), token("c-card", 38, 1, 39)),
             template(vec![
                 node_elem(body_node(
-                    start_tag(
-                        token("<h1>", 8, 1, 9),
-                        token("h1", 9, 1, 10),
-                        vec![],
-                        false,
-                    ),
+                    start_tag(token("<h1>", 8, 1, 9), token("h1", 9, 1, 10), vec![], false),
                     end_tag(token("</h1>", 17, 1, 18), token("h1", 19, 1, 20)),
                     template(vec![text_elem("Title", 12, 1, 13)]),
                 )),
@@ -87,10 +76,7 @@ mod tests {
 
     #[test]
     fn test_composition_mismatched_component_tags() {
-        assert_parse_error(
-            "<c-btn><c-table></c-btn></c-table>",
-            "Mismatched tags",
-        );
+        assert_parse_error("<c-btn><c-table></c-btn></c-table>", "Mismatched tags");
     }
 
     #[test]

@@ -25,10 +25,7 @@ mod tests {
                     token(r#"<c-my-tag c-bind="my_dict" />"#, 0, 1, 1),
                     token("c-my-tag", 1, 1, 2),
                     vec![with_used_vars(
-                        expr_attr(
-                            token("c-bind", 10, 1, 11),
-                            token("my_dict", 18, 1, 19),
-                        ),
+                        expr_attr(token("c-bind", 10, 1, 11), token("my_dict", 18, 1, 19)),
                         vec![token("my_dict", 18, 1, 19)],
                     )],
                     true,
@@ -60,10 +57,7 @@ mod tests {
                     vec![
                         static_attr(token("key1", 10, 1, 11), token("val1", 16, 1, 17)),
                         with_used_vars(
-                            expr_attr(
-                                token("c-bind", 22, 1, 23),
-                                token("my_dict", 30, 1, 31),
-                            ),
+                            expr_attr(token("c-bind", 22, 1, 23), token("my_dict", 30, 1, 31)),
                             vec![token("my_dict", 30, 1, 31)],
                         ),
                         static_attr(token("key2", 39, 1, 40), token("val2", 45, 1, 46)),
@@ -96,18 +90,12 @@ mod tests {
                     token("c-my-tag", 1, 1, 2),
                     vec![
                         with_used_vars(
-                            expr_attr(
-                                token("c-bind", 10, 1, 11),
-                                token("dict1", 18, 1, 19),
-                            ),
+                            expr_attr(token("c-bind", 10, 1, 11), token("dict1", 18, 1, 19)),
                             vec![token("dict1", 18, 1, 19)],
                         ),
                         static_attr(token("key", 25, 1, 26), token("val", 30, 1, 31)),
                         with_used_vars(
-                            expr_attr(
-                                token("c-bind", 35, 1, 36),
-                                token("dict2", 43, 1, 44),
-                            ),
+                            expr_attr(token("c-bind", 35, 1, 36), token("dict2", 43, 1, 44)),
                             vec![token("dict2", 43, 1, 44)],
                         ),
                     ],
@@ -141,18 +129,12 @@ mod tests {
                     token("c-my-tag", 1, 1, 2),
                     vec![
                         with_used_vars(
-                            expr_attr(
-                                token("c-bind", 10, 1, 11),
-                                token("my_dict", 18, 1, 19),
-                            ),
+                            expr_attr(token("c-bind", 10, 1, 11), token("my_dict", 18, 1, 19)),
                             vec![token("my_dict", 18, 1, 19)],
                         ),
                         static_attr(token("key", 27, 1, 28), token("val", 32, 1, 33)),
                         with_used_vars(
-                            expr_attr(
-                                token("c-bind", 37, 1, 38),
-                                token("my_dict", 45, 1, 46),
-                            ),
+                            expr_attr(token("c-bind", 37, 1, 38), token("my_dict", 45, 1, 46)),
                             vec![token("my_dict", 45, 1, 46)],
                         ),
                     ],
@@ -200,10 +182,7 @@ mod tests {
                     token("<c-my-tag c-bind=my_dict />", 0, 1, 1),
                     token("c-my-tag", 1, 1, 2),
                     vec![with_used_vars(
-                        expr_attr_unquoted(
-                            token("c-bind", 10, 1, 11),
-                            token("my_dict", 17, 1, 18),
-                        ),
+                        expr_attr_unquoted(token("c-bind", 10, 1, 11), token("my_dict", 17, 1, 18)),
                         vec![token("my_dict", 17, 1, 18)],
                     )],
                     true,

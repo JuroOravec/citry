@@ -1,5 +1,4 @@
-use crate::ast::Token;
-use crate::lang::lang::{LangImpl, LangSpecArgument, ParseExprResult};
+use crate::lang::lang::{ForLoopVars, LangImpl, LangSpecArgument, ParseExprResult};
 
 /// Rust language implementation
 ///
@@ -307,7 +306,7 @@ impl LangImpl for RustLang {
         Err("Rust expression parsing is not yet implemented. Expressions use CEL-Rust, fasteval, or evalexpr syntax, not raw Rust code.".to_string())
     }
 
-    fn parse_forloop_expression(&self, _source: &str) -> Result<Vec<Token>, String> {
+    fn parse_forloop_variables(&self, _source: &str) -> Result<ForLoopVars, String> {
         // TODO: Implement Rust for-loop variable extraction
         //
         // Steps:

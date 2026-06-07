@@ -244,8 +244,9 @@ Folding does not collapse a subtree to a single string. A folded body is a
 list whose items are one of:
 
 - `str`: static text, passes through unchanged.
-- a **child element** (see the rename in section 6): produced by folding a
-  nested component node whose inputs are const.
+- a **child placeholder** (see section 6): a recipe that, each render, produces a
+  child `CitryRender` (with a fresh render id and re-merged deps) from a nested
+  component node whose inputs are const.
 - a dynamic node: a non-const node that re-evaluates against the live context
   each render.
 
@@ -258,20 +259,28 @@ because every time the outer component renders:
   yields two identities, per #1650), and
 - `Inner`'s JS/CSS must be (re)registered for this render.
 
-So folding a component boundary yields a struct that has done the expensive
+So folding a component boundary yields a placeholder that has done the expensive
 work once (parse, compile, fold of `Inner`'s body) but still re-emits cheaply
-with a fresh ID and re-registers assets on each render. That struct is the
-`CitryElement` below.
+with a fresh ID and re-merges assets on each render. The per-render output of
+that placeholder is a `CitryRender` (see section 6).
 
 ---
 
-## 6. The `CitryElement` type
+## 6. The composition and render structs
 
-`CitryElement` (inspired by React's `ReactElement`) is what calling a component
-produces. It is both the description of a component invocation and the carrier
-of its cached/optimized render state, and instances of it live inside folded
-body lists as the "rendered result" placeholders that re-emit with fresh IDs.
-`Component()` returns a `CitryElement`; `.render()` produces the HTML.
+Two distinct structs sit on either side of `.render()` (full design in
+[`rendering.md`](rendering.md)):
+
+- **`CitryElement`** (inspired by React's `ReactElement`) is what calling a
+  component produces: the description of a component invocation (class plus
+  kwargs/slots). `Component()` returns a `CitryElement`.
+- **`CitryRender`** is what `.render()` produces: the render-phase output
+  carrying the rendered parts plus collected metadata (JS/CSS deps).
+  `CitryRender.serialize()` produces the HTML string.
+
+The folded placeholders of section 5 are recipes that produce a child
+`CitryRender` each render (fresh id, re-merged deps), which is why a component
+boundary cannot fold to frozen text.
 
 ---
 

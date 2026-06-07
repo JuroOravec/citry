@@ -73,7 +73,10 @@ mod tests {
     #[test]
     fn test_expr_simple() {
         // Note: expression content retains its trailing whitespace ("name ").
-        assert_compile("{{ name }}", r#"[ExprNode(source, (0, 10,), """name """, ("name",)),]"#);
+        assert_compile(
+            "{{ name }}",
+            r#"[ExprNode(source, (0, 10,), """name """, ("name",)),]"#,
+        );
     }
 
     #[test]
@@ -94,7 +97,10 @@ mod tests {
 
     #[test]
     fn test_expr_no_vars_has_empty_tuple() {
-        assert_compile("{{ 1 + 2 }}", r#"[ExprNode(source, (0, 11,), """1 + 2 """, ()),]"#);
+        assert_compile(
+            "{{ 1 + 2 }}",
+            r#"[ExprNode(source, (0, 11,), """1 + 2 """, ()),]"#,
+        );
     }
 
     #[test]
@@ -272,9 +278,11 @@ mod tests {
 
     #[test]
     fn test_if_simple() {
+        // `cond` on an explicit `<c-if>` tag is an expression (its variables are
+        // tracked), matching the `c-if="..."` shorthand.
         assert_compile(
             r#"<c-if cond="x">yes</c-if>"#,
-            r#"[IfNode(source, (((0, 25,), (StaticHtmlAttr(source, (6, 14,), """cond""", """x""", ()),), ["""yes""",], (),),), ()),]"#,
+            r#"[IfNode(source, (((0, 25,), (ExprHtmlAttr(source, (6, 14,), """cond""", """x""", ("x",)),), ["""yes""",], (),),), ("x",)),]"#,
         );
     }
 
@@ -282,7 +290,7 @@ mod tests {
     fn test_if_elif_else() {
         assert_compile(
             r#"<c-if cond="x">a</c-if><c-elif cond="y">b</c-elif><c-else>c</c-else>"#,
-            r#"[IfNode(source, (((0, 23,), (StaticHtmlAttr(source, (6, 14,), """cond""", """x""", ()),), ["""a""",], (),), ((23, 50,), (StaticHtmlAttr(source, (31, 39,), """cond""", """y""", ()),), ["""b""",], (),), ((50, 68,), (), ["""c""",], (),),), ()),]"#,
+            r#"[IfNode(source, (((0, 23,), (ExprHtmlAttr(source, (6, 14,), """cond""", """x""", ("x",)),), ["""a""",], (),), ((23, 50,), (ExprHtmlAttr(source, (31, 39,), """cond""", """y""", ("y",)),), ["""b""",], (),), ((50, 68,), (), ["""c""",], (),),), ("x", "y",)),]"#,
         );
     }
 
@@ -295,7 +303,7 @@ mod tests {
     fn test_for_simple() {
         assert_compile(
             r#"<c-for each="item in items">{{ item }}</c-for>"#,
-            r#"[ForNode(source, (((0, 46,), (StaticHtmlAttr(source, (7, 27,), """each""", """item in items""", ()),), [ExprNode(source, (28, 38,), """item """, ("item",)),], ("item",),),), ()),]"#,
+            r#"[ForNode(source, (((0, 46,), (ExprHtmlAttr(source, (7, 27,), """each""", """item in items""", ("items",)),), [ExprNode(source, (28, 38,), """item """, ("item",)),], ("item",),),), ("items",)),]"#,
         );
     }
 
@@ -303,7 +311,7 @@ mod tests {
     fn test_for_with_empty() {
         assert_compile(
             r#"<c-for each="item in items">{{ item }}</c-for><c-empty>none</c-empty>"#,
-            r#"[ForNode(source, (((0, 46,), (StaticHtmlAttr(source, (7, 27,), """each""", """item in items""", ()),), [ExprNode(source, (28, 38,), """item """, ("item",)),], ("item",),), ((46, 69,), (), ["""none""",], (),),), ()),]"#,
+            r#"[ForNode(source, (((0, 46,), (ExprHtmlAttr(source, (7, 27,), """each""", """item in items""", ("items",)),), [ExprNode(source, (28, 38,), """item """, ("item",)),], ("item",),), ((46, 69,), (), ["""none""",], (),),), ("items",)),]"#,
         );
     }
 
@@ -323,9 +331,12 @@ mod tests {
 
     #[test]
     fn test_attr_c_for_wraps_host() {
+        // The `c-for` shorthand tracks the same variables as the explicit
+        // `<c-for each=...>`: the loop targets are introduced (not used), and the
+        // clause's free variables (`items`) are the used variables.
         assert_compile(
             r#"<div c-for="item in items">{{ item }}</div>"#,
-            r#"[ForNode(source, (((0, 43,), (ExprHtmlAttr(source, (5, 26,), """each""", """item in items""", ("item", "items",)),), ["""<div>""", ExprNode(source, (27, 37,), """item """, ("item",)), """</div>""",], (),),), ("item", "items",)),]"#,
+            r#"[ForNode(source, (((0, 43,), (ExprHtmlAttr(source, (5, 26,), """each""", """item in items""", ("items",)),), ["""<div>""", ExprNode(source, (27, 37,), """item """, ("item",)), """</div>""",], ("item",),),), ("items",)),]"#,
         );
     }
 
@@ -334,7 +345,7 @@ mod tests {
         // IF has higher priority than FOR, so the IfNode wraps the ForNode.
         assert_compile(
             r#"<div c-if="x" c-for="item in items">{{ item }}</div>"#,
-            r#"[IfNode(source, (((0, 52,), (ExprHtmlAttr(source, (5, 13,), """cond""", """x""", ("x",)),), [ForNode(source, (((0, 52,), (ExprHtmlAttr(source, (14, 35,), """each""", """item in items""", ("item", "items",)),), ["""<div>""", ExprNode(source, (36, 46,), """item """, ("item",)), """</div>""",], (),),), ("item", "x", "items",)),], (),),), ("item", "x", "items",)),]"#,
+            r#"[IfNode(source, (((0, 52,), (ExprHtmlAttr(source, (5, 13,), """cond""", """x""", ("x",)),), [ForNode(source, (((0, 52,), (ExprHtmlAttr(source, (14, 35,), """each""", """item in items""", ("items",)),), ["""<div>""", ExprNode(source, (36, 46,), """item """, ("item",)), """</div>""",], ("item",),),), ("x", "items",)),], ("item",),),), ("x", "items",)),]"#,
         );
     }
 

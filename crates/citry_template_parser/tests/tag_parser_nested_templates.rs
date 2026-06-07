@@ -28,12 +28,7 @@ mod tests {
         let expected = template_with_vars(
             vec![node_elem(self_closing_node_vars(
                 start_tag(
-                    token(
-                        r#"<c-my-tag c-body="<>Hello {{ name }}</>" />"#,
-                        0,
-                        1,
-                        1,
-                    ),
+                    token(r#"<c-my-tag c-body="<>Hello {{ name }}</>" />"#, 0, 1, 1),
                     token("c-my-tag", 1, 1, 2),
                     vec![with_used_vars(
                         template_attr(
@@ -89,12 +84,7 @@ mod tests {
         let result = parse_template(input, None, None).unwrap();
 
         let expected = template(vec![node_elem(self_closing_node(start_tag(
-            token(
-                r#"<c-my-tag c-body=" <>Hello</> " />"#,
-                0,
-                1,
-                1,
-            ),
+            token(r#"<c-my-tag c-body=" <>Hello</> " />"#, 0, 1, 1),
             token("c-my-tag", 1, 1, 2),
             vec![template_attr(
                 token("c-body", 10, 1, 11),
@@ -215,12 +205,7 @@ mod tests {
         let result = parse_template(input, None, None).unwrap();
 
         let expected = template(vec![node_elem(self_closing_node(start_tag(
-            token(
-                r#"<c-my-tag c-body=" <span>A</span> " />"#,
-                0,
-                1,
-                1,
-            ),
+            token(r#"<c-my-tag c-body=" <span>A</span> " />"#, 0, 1, 1),
             token("c-my-tag", 1, 1, 2),
             vec![template_attr(
                 token("c-body", 10, 1, 11),
@@ -250,12 +235,7 @@ mod tests {
         let result = parse_template(input, None, None).unwrap();
 
         let expected = template(vec![node_elem(self_closing_node(start_tag(
-            token(
-                r#"<c-my-tag c-body="<c-btn>Click</c-btn>" />"#,
-                0,
-                1,
-                1,
-            ),
+            token(r#"<c-my-tag c-body="<c-btn>Click</c-btn>" />"#, 0, 1, 1),
             token("c-my-tag", 1, 1, 2),
             vec![template_attr(
                 token("c-body", 10, 1, 11),
@@ -277,12 +257,7 @@ mod tests {
         let result = parse_template(input, None, None).unwrap();
 
         let expected = template(vec![node_elem(self_closing_node(start_tag(
-            token(
-                r#"<c-my-tag c-body="<c-a>A</c-a><c-b>B</c-b>" />"#,
-                0,
-                1,
-                1,
-            ),
+            token(r#"<c-my-tag c-body="<c-a>A</c-a><c-b>B</c-b>" />"#, 0, 1, 1),
             token("c-my-tag", 1, 1, 2),
             vec![template_attr(
                 token("c-body", 10, 1, 11),
@@ -304,12 +279,7 @@ mod tests {
         let result = parse_template(input, None, None).unwrap();
 
         let expected = template(vec![node_elem(self_closing_node(start_tag(
-            token(
-                r#"<c-my-tag c-body=" <c-btn>Click</c-btn> " />"#,
-                0,
-                1,
-                1,
-            ),
+            token(r#"<c-my-tag c-body=" <c-btn>Click</c-btn> " />"#, 0, 1, 1),
             token("c-my-tag", 1, 1, 2),
             vec![template_attr(
                 token("c-body", 10, 1, 11),

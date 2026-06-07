@@ -227,7 +227,8 @@ class ComponentNode:
         return f"ComponentNode(name={self.name!r}, attrs={len(self.attrs)}, body={len(self.body)} items)"
 
 
-class IfNode:
+@final
+class IfNode(Node):
     """
     A conditional node (``<c-if>``/``<c-elif>``/``<c-else>``).
 
@@ -240,6 +241,10 @@ class IfNode:
         an ``IfNode`` with two branches - one for the if-body and one for
         the else-body.
 
+    Each branch is ``((start, end), (attrs,), [body], (introduced_vars,))``.
+    The ``c-if``/``c-elif`` branches carry a ``cond`` attribute (an
+    ``ExprHtmlAttr``); the ``c-else`` branch has none and always matches.
+
     """
 
     def __init__(self, source: Any, branches: tuple[Any, ...], used_vars: tuple[str, ...]) -> None:
@@ -247,14 +252,37 @@ class IfNode:
         self.branches = branches
         self.used_vars = used_vars
 
-    def render(self, context: Any) -> str:
-        raise NotImplementedError("IfNode.render")
+    @override
+    def render(self, context: CitryContext) -> CitryRender:
+        """
+        Render the first branch whose ``cond`` is truthy.
+
+        Branches are tried in source order (``c-if`` then each ``c-elif`` then
+        ``c-else``). A branch's ``cond`` attribute is resolved against the
+        context; the first truthy one wins. A branch with no ``cond`` (the
+        ``c-else``) always matches. If none match, the render is empty.
+
+        The body renders against the surrounding ``context`` unchanged: an
+        ``<c-if>`` introduces no variables, so there is no new scope.
+        """
+        # Imported lazily: component_render imports the node classes, so importing
+        # the body walker at module load would be circular.
+        from citry.component_render import _render_body  # noqa: PLC0415
+
+        for branch in self.branches:
+            attrs: tuple[HtmlAttr, ...] = branch[1]
+            body: list[BodyItem] = branch[2]
+            cond_attr = _find_attr(attrs, "cond")
+            if cond_attr is None or cond_attr.resolve(context):
+                return CitryRender(parts=_render_body(body, context), context=context)
+        return CitryRender(parts=[], context=context)
 
     def __repr__(self) -> str:
         return f"IfNode(branches={len(self.branches)})"
 
 
-class ForNode:
+@final
+class ForNode(Node):
     """
     A loop node (``<c-for>``/``<c-empty>``).
 
@@ -267,21 +295,81 @@ class ForNode:
         a ``ForNode`` with one branch. Adding ``<c-empty>none</c-empty>``
         after it adds a second branch for the empty state.
 
+    Each branch is ``((start, end), (attrs,), [body], (introduced_vars,))``.
+    The loop branch carries an ``each`` attribute holding a Python comprehension
+    clause (``"item in items"``, or the full ``"x in xs for y in ys if ..."``);
+    ``introduced_vars`` are the loop targets it binds.
+
     """
 
     def __init__(self, source: Any, branches: tuple[Any, ...], used_vars: tuple[str, ...]) -> None:
         self.source = source
         self.branches = branches
         self.used_vars = used_vars
+        # The generator-expression evaluator for the `each` clause, compiled
+        # lazily on first render and reused afterwards (the node is cached across
+        # renders, so this compiles once).
+        self._iter_eval: Callable[[Any], Any] | None = None
 
-    def render(self, context: Any) -> str:
-        raise NotImplementedError("ForNode.render")
+    @override
+    def render(self, context: CitryContext) -> CitryRender:
+        """
+        Render the loop body once per item; the empty branch if there are none.
+
+        The ``each`` clause is a Python comprehension clause, so the loop is
+        evaluated by wrapping it in a generator expression that yields the loop
+        targets as a tuple: ``each="x in xs if x > 0"`` becomes
+        ``((x,) for x in xs if x > 0)``. This reuses Python's own comprehension
+        semantics, so multi-target unpacking and ``if`` filters work for free.
+
+        Each iteration renders the body against a child context whose
+        ``variables`` are the surrounding ones overlaid with the loop bindings.
+        The child shares the parent's ``component`` and ``extra`` bag, so the
+        loop introduces a variable scope without crossing a component boundary
+        (dependencies still bubble through the shared ``extra``).
+        """
+        from citry.component_render import _render_body  # noqa: PLC0415
+
+        for_branch = self.branches[0]
+        targets: tuple[str, ...] = for_branch[3]
+        body: list[BodyItem] = for_branch[2]
+
+        if self._iter_eval is None:
+            each_attr = _find_attr(for_branch[1], "each")
+            if not isinstance(each_attr, ExprHtmlAttr):
+                msg = "ForNode loop branch is missing a usable 'each' expression."
+                raise RuntimeError(msg)
+            # `each_attr.expr` is the raw clause, e.g. "item in items". Wrapping
+            # the targets in a 1-tuple keeps single- and multi-target binding
+            # uniform: `(x,)` for one target, `(k, v,)` for several.
+            clause = each_attr.expr
+            gen_src = f"(({', '.join(targets)},) for {clause})"
+            self._iter_eval = safe_eval(gen_src)
+
+        parts: list[RenderPart] = []
+        count = 0
+        for values in self._iter_eval(context.variables):
+            count += 1
+            child = CitryContext(
+                variables={**context.variables, **dict(zip(targets, values, strict=True))},
+                extra=context.extra,
+                component=context.component,
+            )
+            parts.extend(_render_body(body, child))
+
+        # No iterations: render the optional <c-empty> branch (second branch).
+        if count == 0 and len(self.branches) > 1:
+            empty_branch = self.branches[1]
+            parts.extend(_render_body(empty_branch[2], context))
+
+        return CitryRender(parts=parts, context=context)
 
     def __repr__(self) -> str:
         return f"ForNode(branches={len(self.branches)})"
 
 
-class SlotNode:
+@final
+class SlotNode(Node):
     """
     A slot definition (``<c-slot>``).
 
@@ -300,8 +388,8 @@ class SlotNode:
         self,
         source: Any,
         position: tuple[int, int],
-        attrs: tuple[Any, ...],
-        body: list[Any],
+        attrs: tuple[HtmlAttr, ...],
+        body: list[BodyItem],
         used_vars: tuple[str, ...],
         introduced_vars: tuple[str, ...],
     ) -> None:
@@ -312,14 +400,12 @@ class SlotNode:
         self.used_vars = used_vars
         self.introduced_vars = introduced_vars
 
-    def render(self, context: Any) -> str:
-        raise NotImplementedError("SlotNode.render")
-
     def __repr__(self) -> str:
         return f"SlotNode(attrs={len(self.attrs)})"
 
 
-class FillNode:
+@final
+class FillNode(Node):
     """
     A slot fill (``<c-fill>``).
 
@@ -332,14 +418,17 @@ class FillNode:
 
             FillNode(source, (0, 40,), (StaticHtmlAttr(...),), ["content"], (), ())
 
+    Rendering is not implemented yet; it inherits ``Node.render`` (raises
+    ``NotImplementedError``) until the slots phase.
+
     """
 
     def __init__(
         self,
         source: Any,
         position: tuple[int, int],
-        attrs: tuple[Any, ...],
-        body: list[Any],
+        attrs: tuple[HtmlAttr, ...],
+        body: list[BodyItem],
         used_vars: tuple[str, ...],
         introduced_vars: tuple[str, ...],
     ) -> None:
@@ -349,9 +438,6 @@ class FillNode:
         self.body = body
         self.used_vars = used_vars
         self.introduced_vars = introduced_vars
-
-    def render(self, context: Any) -> str:
-        raise NotImplementedError("FillNode.render")
 
     def __repr__(self) -> str:
         return f"FillNode(attrs={len(self.attrs)})"

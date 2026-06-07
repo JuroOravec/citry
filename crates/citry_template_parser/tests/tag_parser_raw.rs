@@ -24,10 +24,7 @@ mod tests {
                 vec![],
                 false,
             ),
-            end_tag(
-                token("</c-raw>", 53, 1, 54),
-                token("c-raw", 55, 1, 56),
-            ),
+            end_tag(token("</c-raw>", 53, 1, 54), token("c-raw", 55, 1, 56)),
             template(vec![text_elem(
                 "{{ not parsed }} {% also not %} {# nor this #}",
                 7,
@@ -81,16 +78,8 @@ mod tests {
                 vec![],
                 false,
             ),
-            end_tag(
-                token("</c-raw>", 34, 1, 35),
-                token("c-raw", 36, 1, 37),
-            ),
-            template(vec![text_elem(
-                r#"<c-if cond="x">hello</c-if>"#,
-                7,
-                1,
-                8,
-            )]),
+            end_tag(token("</c-raw>", 34, 1, 35), token("c-raw", 36, 1, 37)),
+            template(vec![text_elem(r#"<c-if cond="x">hello</c-if>"#, 7, 1, 8)]),
         ))]);
 
         assert_eq!(result, expected);

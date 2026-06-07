@@ -8,20 +8,21 @@ use crate::ast::{
     Template, TemplateElement, Text, Token,
 };
 use crate::constants::{
-    CONTROL_FLOW_GROUPS, CONTROL_FLOW_TAGS, C_COMPONENT_TAG, C_FILL_TAG, C_FOR_TAG, C_SLOT_TAG,
-    FORBIDDEN_HTML_TAG_NAMES, HTML_VOID_ELEMENTS, RESERVED_TAG_NAMES, TAG_ATTR_RULES,
-    TAG_ORDERING_RULES,
+    CONTROL_FLOW_GROUPS, CONTROL_FLOW_TAGS, C_COMPONENT_TAG, C_ELIF_TAG, C_FILL_TAG, C_FOR_TAG,
+    C_IF_TAG, C_SLOT_TAG, FORBIDDEN_HTML_TAG_NAMES, HTML_VOID_ELEMENTS, RESERVED_TAG_NAMES,
+    TAG_ATTR_RULES, TAG_ORDERING_RULES,
 };
 use crate::error::{assert_rule, assert_rules, ParseError};
 use crate::grammar::{GrammarParser, Rule};
-use crate::lang::lang::{Lang, LangImpl};
+use crate::lang::lang::{ForLoopVars, Lang, LangImpl};
 use crate::parser_context::{ParserContext, TagRules};
 use crate::utils::pest::{span_from_str, unwrap_pair};
 
 /// Result of processing an HTML tag
 enum HtmlTagResult {
-    /// Start tag - Will start new layer in stack
-    StartTag(HtmlStartTag),
+    /// Start tag - Will start new layer in stack. Carries the variables the tag
+    /// introduces into its body scope (computed alongside attribute enrichment).
+    StartTag(HtmlStartTag, Vec<Token>),
     /// End tag - Will close current layer in stack
     EndTag(HtmlEndTag),
     /// Self-closing tag - Will be added to current layer in stack
@@ -37,6 +38,11 @@ struct TagStackEntry {
     start_tag: HtmlStartTag,
     /// The body content (template elements inside the tag)
     body: Template,
+    /// Variables this tag introduces into its body scope (loop targets for
+    /// `c-for`, slot data/default for `c-fill`), computed once when the start
+    /// tag is processed and carried here until the node is finalized at its end
+    /// tag.
+    introduced_variables: Vec<Token>,
 }
 
 /// Parse a complete template into a Template AST
@@ -244,7 +250,7 @@ fn process_template_element(
                     finalize_node(node, tag_stack, root_template, context)?;
                 }
                 // Create new layer in the stack (unless it's a void element)
-                HtmlTagResult::StartTag(start_tag) => {
+                HtmlTagResult::StartTag(start_tag, introduced_variables) => {
                     // Check if this is an HTML void element (br, img, input, etc.)
                     // These don't need closing tags and are treated as self-closing
                     let tag_name = start_tag.name.content.as_str();
@@ -260,7 +266,7 @@ fn process_template_element(
                             used_variables,
                             comments: start_tag.comments.clone(),
                             start_tag,
-                            introduced_variables: vec![],
+                            introduced_variables,
                             contains_fills: false,
                         };
                         finalize_node(node, tag_stack, root_template, context)?;
@@ -271,7 +277,11 @@ fn process_template_element(
                             used_variables: vec![],
                             slots: vec![],
                         };
-                        tag_stack.push(TagStackEntry { start_tag, body });
+                        tag_stack.push(TagStackEntry {
+                            start_tag,
+                            body,
+                            introduced_variables,
+                        });
                     }
                 }
                 // Close current layer in the stack
@@ -302,11 +312,14 @@ fn process_template_element(
                     }
 
                     // Pop current layer from stack
-                    let TagStackEntry { start_tag, body } = tag_stack.pop().unwrap();
+                    let TagStackEntry {
+                        start_tag,
+                        body,
+                        introduced_variables,
+                    } = tag_stack.pop().unwrap();
 
-                    let introduced_variables = extract_introduced_variables(&start_tag, context)?;
-
-                    // Create Node and push to parent context
+                    // `introduced_variables` was computed when the start tag was
+                    // processed (see process_control_flow_metadata).
                     let node = Node::from_start_and_end_tags(
                         start_tag,
                         end_tag,
@@ -545,8 +558,8 @@ fn process_html_tag(
 
     match inner_rule {
         Rule::html_start_tag => {
-            let start_tag = process_html_start_tag(inner, context)?;
-            Ok(HtmlTagResult::StartTag(start_tag))
+            let (start_tag, introduced_variables) = process_html_start_tag(inner, context)?;
+            Ok(HtmlTagResult::StartTag(start_tag, introduced_variables))
         }
         Rule::html_end_tag => {
             let end_tag = process_html_end_tag(inner, context)?;
@@ -567,7 +580,7 @@ fn process_html_tag(
 fn process_html_start_tag(
     start_tag_pair: pest::iterators::Pair<Rule>,
     context: &ParserContext,
-) -> Result<HtmlStartTag, ParseError> {
+) -> Result<(HtmlStartTag, Vec<Token>), ParseError> {
     // html_start_tag = "<" ~ html_tag_name ~ (spacing_with_whitespace ~ html_attribute)* ~ spacing* ~ ">"
     let start_tag_span = start_tag_pair.as_span();
     let start_tag_token = context.create_token(&start_tag_pair);
@@ -603,7 +616,13 @@ fn process_html_start_tag(
     }
 
     // Parse attributes from the remaining filtered pairs
-    let attrs = parse_html_attributes(filtered_pairs, context)?;
+    let mut attrs = parse_html_attributes(filtered_pairs, context)?;
+
+    // Enrich control-flow attributes and compute the variables this tag
+    // introduces, in one pass (see process_control_flow_metadata).
+    let introduced_variables =
+        process_control_flow_metadata(&name.content, &start_tag_token, &mut attrs, context)?;
+
     let start_tag = HtmlStartTag {
         token: start_tag_token,
         name,
@@ -612,7 +631,7 @@ fn process_html_start_tag(
         comments,
     };
 
-    Ok(start_tag)
+    Ok((start_tag, introduced_variables))
 }
 
 /// Process an HTML end tag: validates and returns the end tag
@@ -711,7 +730,12 @@ fn process_html_self_closing_tag(
     }
 
     // Parse attributes from the remaining filtered pairs
-    let attrs = parse_html_attributes(filtered_pairs, context)?;
+    let mut attrs = parse_html_attributes(filtered_pairs, context)?;
+
+    // Enrich control-flow attributes and compute the introduced variables in one
+    // pass (see process_control_flow_metadata).
+    let introduced_variables =
+        process_control_flow_metadata(&name.content, &self_closing_token, &mut attrs, context)?;
 
     let used_variables = attrs
         .iter()
@@ -728,8 +752,6 @@ fn process_html_self_closing_tag(
         is_self_closing: true,
         comments: comments_from_tag,
     };
-
-    let introduced_variables = extract_introduced_variables(&start_tag, context)?;
 
     Ok(Node::SelfClosing {
         start_tag,
@@ -954,7 +976,8 @@ fn process_html_raw(
         )
     })?;
     assert_rule(&start_tag_pair, Rule::html_raw_start_tag)?;
-    let start_tag = process_html_start_tag(start_tag_pair, context)?;
+    // `<c-raw>` allows no attributes, so it introduces no variables.
+    let (start_tag, _introduced_variables) = process_html_start_tag(start_tag_pair, context)?;
 
     // Get content
     let content_pair = inner.next().ok_or_else(|| {
@@ -1423,64 +1446,125 @@ fn validate_variable_shadowing(node: &Node) -> Result<(), ParseError> {
     Ok(())
 }
 
-// Extract introduced variables (e.g. the loop variables from <c-for>, or `data/default` attributes of <c-fill>)
-fn extract_introduced_variables(
-    start_tag: &HtmlStartTag,
+/// Enrich a tag's control-flow attributes and compute the variables it
+/// introduces into its body scope, in a single pass.
+///
+/// The parser keeps the AST 1:1 with the source (it does NOT rewrite
+/// `<div c-if="x">` into `<c-if cond="x">`; that expansion happens in the
+/// compiler). But the attribute variable metadata is corrected in place so the
+/// explicit-tag and shorthand authoring styles agree once the compiler expands
+/// them:
+///
+/// - The explicit `cond` (on `<c-if>`/`<c-elif>`) and `each` (on `<c-for>`)
+///   attributes are not `c-` prefixed, so attribute parsing classifies them as
+///   `Static` and skips variable tracking. They are upgraded to `Expression`
+///   with their used variables populated.
+/// - The shorthand `c-for` attribute (on any element) is parsed as a generic
+///   expression, so its used variables wrongly include the loop targets (e.g.
+///   `c-for="x in xs"` reports both `x` and `xs`). They are recomputed as the
+///   loop's free variables (`xs`), matching the explicit `each` form.
+///
+/// The returned vector is the node's introduced variables: the loop targets for
+/// a `c-for` (explicit or shorthand) and the data/default variables for a
+/// `<c-fill>`. For a for-loop clause both the used and introduced variables come
+/// from one [`extract_forloop_variables`] call, so the clause is analysed once.
+///
+/// The `c-if`/`c-elif` shorthand attributes already track their variables
+/// correctly (a plain expression, no targets), so they need no change.
+fn process_control_flow_metadata(
+    tag_name: &str,
+    tag_token: &Token,
+    attrs: &mut [HtmlAttr],
     context: &ParserContext,
 ) -> Result<Vec<Token>, ParseError> {
-    if start_tag.name.content == C_FOR_TAG {
-        _extract_for_loop_variables_from_start_tag(&start_tag, context)
-    } else if start_tag.name.content == C_FILL_TAG {
-        // For <c-fill>, simply take the contents from the static data/default attributes
-        let mut var_tokens = Vec::new();
-        for attr in &start_tag.attrs {
+    // `<c-fill>` introduces its data/default variables; nothing to enrich.
+    if tag_name == C_FILL_TAG {
+        let mut introduced = Vec::new();
+        for attr in attrs.iter() {
             if attr.key.content == "data" || attr.key.content == "default" {
                 if let Some(inner_value) = &attr.inner_value {
-                    var_tokens.push(inner_value.clone());
+                    introduced.push(inner_value.clone());
                 }
             }
         }
-        Ok(var_tokens)
-    } else {
-        // Other tags don't introduce variables
-        Ok(vec![])
-    }
-}
-
-/// Extract for loop variables from a <c-for> start tag.
-fn _extract_for_loop_variables_from_start_tag(
-    start_tag: &HtmlStartTag,
-    context: &ParserContext,
-) -> Result<Vec<Token>, ParseError> {
-    if start_tag.name.content != C_FOR_TAG {
-        // Other tags don't introduce variables
-        return Ok(vec![]);
+        return Ok(introduced);
     }
 
-    // Find the "each" attribute
-    let each_attr = start_tag
-        .attrs
-        .iter()
-        .find(|attr| attr.key.content == "each")
-        .ok_or_else(|| {
+    // Explicit `<c-for each="...">`: the `each` attribute is required and must
+    // have a value. Its clause yields both the used and introduced variables.
+    if tag_name == C_FOR_TAG {
+        let each_attr = attrs
+            .iter_mut()
+            .find(|attr| attr.key.content == "each")
+            .ok_or_else(|| {
+                ParseError::from_span(
+                    tag_token.as_span().unwrap(),
+                    "Tag '<c-for>' must have an 'each' attribute.".to_string(),
+                )
+            })?;
+        let each_value = each_attr.inner_value.clone().ok_or_else(|| {
             ParseError::from_span(
-                start_tag.token.as_span().unwrap(),
-                "Tag '<c-for>' must have an 'each' attribute.".to_string(),
+                each_attr.token.as_span().unwrap(),
+                "Tag '<c-for>' attribute 'each' must have a value.".to_string(),
             )
         })?;
+        let vars = extract_forloop_variables(&each_value, context)?;
+        each_attr.kind = HtmlAttrKind::Expression;
+        each_attr.used_variables = vars.used;
+        return Ok(vars.introduced);
+    }
 
-    // Get the inner value (the expression without quotes)
-    let each_value = each_attr.inner_value.as_ref().ok_or_else(|| {
-        ParseError::from_span(
-            each_attr.token.as_span().unwrap(),
-            "Tag '<c-for>' attribute 'each' must have a value.".to_string(),
-        )
-    })?;
+    // Otherwise: enrich a `cond` expression (on `<c-if>`/`<c-elif>`) and/or a
+    // shorthand `c-for` attribute (on any element). Only the shorthand `c-for`
+    // introduces variables.
+    let mut introduced = Vec::new();
+    for attr in attrs.iter_mut() {
+        let is_for_shorthand = attr.key.content == C_FOR_TAG;
+        let is_cond = matches!(tag_name, C_IF_TAG | C_ELIF_TAG) && attr.key.content == "cond";
+        if !is_for_shorthand && !is_cond {
+            continue;
+        }
 
-    // Delegate to language-specific implementation to parse the for-loop expression
-    let var_tokens = context
+        let Some(inner_value) = attr.inner_value.clone() else {
+            // Boolean / valueless attribute: leave for the attribute-presence
+            // validator to report (`cond` requires a value).
+            continue;
+        };
+        if inner_value.content.trim().is_empty() {
+            // `cond=""` carries no expression; an empty value is the boolean form
+            // (the compiler normalizes it to `True`), so there is nothing to
+            // track. Leave it as-is.
+            continue;
+        }
+
+        if is_for_shorthand {
+            let vars = extract_forloop_variables(&inner_value, context)?;
+            attr.used_variables = vars.used;
+            introduced = vars.introduced;
+        } else {
+            let (used_variables, comments) = process_expression(&inner_value, None, context)?;
+            attr.used_variables = used_variables;
+            attr.comments.extend(comments);
+        }
+        attr.kind = HtmlAttrKind::Expression;
+    }
+
+    Ok(introduced)
+}
+
+/// Analyse a `<c-for>` clause and return its introduced (loop target) and used
+/// (free) variables, with token positions adjusted into the template's
+/// coordinate space.
+///
+/// Both halves come from one [`LangImpl::parse_forloop_variables`] call, so the
+/// clause is parsed once and the two variable sets are guaranteed consistent.
+fn extract_forloop_variables(
+    each_value: &Token,
+    context: &ParserContext,
+) -> Result<ForLoopVars, ParseError> {
+    let vars = context
         .lang
-        .parse_forloop_expression(&each_value.content)
+        .parse_forloop_variables(&each_value.content)
         .map_err(|e| {
             ParseError::from_span(
                 each_value.as_span().unwrap(),
@@ -1488,21 +1572,21 @@ fn _extract_for_loop_variables_from_start_tag(
             )
         })?;
 
-    // Adjust token positions to match the template context
-    // Calculate offsets for adjusting token positions
     let index_offset = each_value.start_index;
     let (value_line, value_col) = each_value.line_col;
-    // line_offset: value_line - 1 (because lines are 1-indexed)
     let line_offset = value_line - 1;
-    // col_offset: value_col - 1 (because cols are 1-indexed)
     let col_offset = value_col - 1;
+    let adjust = |tokens: Vec<Token>| -> Vec<Token> {
+        tokens
+            .into_iter()
+            .map(|token| token.offset(index_offset, line_offset, col_offset))
+            .collect()
+    };
 
-    let adjusted_tokens: Vec<Token> = var_tokens
-        .into_iter()
-        .map(|token| token.offset(index_offset, line_offset, col_offset))
-        .collect();
-
-    Ok(adjusted_tokens)
+    Ok(ForLoopVars {
+        introduced: adjust(vars.introduced),
+        used: adjust(vars.used),
+    })
 }
 
 /// Validate that special tags and user-defined components have the correct attributes.

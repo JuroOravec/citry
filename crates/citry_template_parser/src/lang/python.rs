@@ -5,7 +5,7 @@ use python_safe_eval::transformer::{
 use ruff_python_ast::Expr as PythonAstExpr;
 
 use crate::ast::{Comment, Token};
-use crate::lang::lang::{LangImpl, LangSpecArgument, ParseExprResult};
+use crate::lang::lang::{ForLoopVars, LangImpl, LangSpecArgument, ParseExprResult};
 
 /// Python language implementation
 #[derive(Copy, Clone)]
@@ -57,24 +57,25 @@ impl LangImpl for PythonLang {
         })
     }
 
-    fn parse_forloop_expression(&self, source: &str) -> Result<Vec<Token>, String> {
-        // We will delegate to Ruff's Python AST parser to parse the expression as a valid Python comprehension.
-        // But `a, b, c in my_list` is not a valid comprehension on its own, so we need to wrap it in a generator:
-        // `(None for a, b, c in my_list)`
-        let wrapped_expr = format!("(None for {})", source);
+    fn parse_forloop_variables(&self, source: &str) -> Result<ForLoopVars, String> {
+        // `a, b in items` is not a valid expression on its own, so we wrap it in a
+        // generator and analyse that: `(None for a, b in items)`. Both halves of
+        // the result come from this one wrapped clause.
+        let prefix = "(None for ";
+        let prefix_len = prefix.len();
+        let wrapped_expr = format!("{}{})", prefix, source);
 
-        // When there is an error in parsing the Python comprehension, we want to show to the user
-        // position of the error in the ORIGINAL "each" attribute value, not the wrapped expression.
-        // So we need to account for the prefix length that we've introduced.
-        let prefix_len = "(None for ".len();
+        // --- Introduced (loop target) variables ---
+        // Parse the comprehension and walk each generator's target. (Parsing
+        // errors are reported against the ORIGINAL source, hence the prefix-aware
+        // helper.)
         let ast = parse_expression_with_adjusted_error_ranges(&wrapped_expr, source, prefix_len)?;
 
         // Extract the expression from the module
         let module = ast.syntax();
-        let expr = module.body.as_ref();
 
         // Check if it's a generator expression
-        let generators = match expr {
+        let generators = match module.body.as_ref() {
             PythonAstExpr::Generator(expr_gen) => {
                 // Must have at least one generator
                 if expr_gen.generators.is_empty() {
@@ -94,32 +95,58 @@ impl LangImpl for PythonLang {
         };
 
         // Extract variable tokens from all generators
-        let mut all_var_tokens = Vec::new();
+        let mut introduced = Vec::new();
         for comprehension in generators {
             let var_tokens = _extract_variable_names_from_comp_target(
                 &comprehension.target,
                 source,
                 prefix_len,
             )?;
-            // NOTE: This should never raise, because Ruff Python AST parser should raise error before we get here.
+            // NOTE: This should never raise, because Ruff would error first.
             if var_tokens.is_empty() {
                 return Err(
                     "Tag '<c-for>' 'each' attribute: each 'for ... in ...' clause must have at least one loop variable."
                         .to_string(),
                 );
             }
-            all_var_tokens.extend(var_tokens);
+            introduced.extend(var_tokens);
         }
-
         // If no variables were found, raise error
-        // NOTE: This should never raise, because Ruff Python AST parser should raise error before we get here.
-        if all_var_tokens.is_empty() {
+        // NOTE: This should never raise, because Ruff would error first.
+        if introduced.is_empty() {
             return Err(
                 "Tag '<c-for>' 'each' attribute must have at least one loop variable.".to_string(),
             );
         }
 
-        Ok(all_var_tokens)
+        // --- Used (free) variables ---
+        // Reuse the scope-aware expression analyser on the same wrapped clause. It
+        // treats the comprehension targets as bound, so the reported used
+        // variables are exactly the free variables of the iterable/condition
+        // clauses. The tokens are positioned relative to `wrapped_expr`; shift
+        // them back so they are relative to `source`. A token inside the synthetic
+        // prefix is not part of the user's source and is dropped (the prefix only
+        // contains the `None` keyword, never a used variable, so this is a safety
+        // net).
+        let used = self
+            .parse_expression(&wrapped_expr)?
+            .used_vars
+            .into_iter()
+            .filter_map(|mut token| {
+                if token.start_index < prefix_len {
+                    return None;
+                }
+                token.start_index -= prefix_len;
+                token.end_index -= prefix_len;
+                // The synthetic prefix is single-line, so only first-line columns shift.
+                if token.line_col.0 == 1 {
+                    token.line_col = (1, token.line_col.1 - prefix_len);
+                }
+                Some(token)
+            })
+            .collect();
+
+        Ok(ForLoopVars { introduced, used })
     }
 
     // Generate code for a Python function that returns a list of node objects (TextNode, ExprNode, etc.)
