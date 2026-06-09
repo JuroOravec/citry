@@ -40,11 +40,14 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from citry.component_registry import ComponentRegistry
+from citry.extension import ExtensionManager
+from citry.settings import CitrySettings
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping, Sequence
 
     from citry.component import Component
+    from citry.extension import Extension
 
 
 class Citry:
@@ -67,25 +70,60 @@ class Citry:
     - Multiple independent component trees can coexist.
     """
 
-    def __init__(self, **settings: Any) -> None:
-        # TODO - Add type once known
-        self._settings = settings
+    def __init__(
+        self,
+        extensions: Sequence[type[Extension] | Extension | str] = (),
+        extensions_defaults: Mapping[str, Mapping[str, Any]] | None = None,
+    ) -> None:
+        self.settings = CitrySettings(
+            extensions=tuple(extensions),
+            extensions_defaults=dict(extensions_defaults) if extensions_defaults is not None else {},
+        )
         self.registry = ComponentRegistry()
         # Const-keyed body cache: (component class, const signature) -> body.
         # Skeleton for the const-folding feature (docs/design/constness.md);
         # the body is not yet specialized per signature.
         self._const_body_cache: dict[tuple[type[Component], frozenset[tuple[str, Any]]], list[Any]] = {}
 
+        # The extension/hook system, scoped to this Citry instance (DJC #1413).
+        # Extensions are present from construction, so hooks fire immediately.
+        self.extensions = ExtensionManager(self, self.settings.extensions)
+        self.extensions.on_extension_created()
+
+    def __repr__(self) -> str:
+        return f"Citry(components={len(self.registry)})"
+
     # Convenience delegations so users can write citry.get("card")
     # instead of citry.registry.get("card").
 
     def register(self, comp_cls: type[Component], name: str | None = None) -> None:
-        """Register a component. See ``ComponentRegistry.register``."""
+        """
+        Register a component. See ``ComponentRegistry.register``.
+
+        Fires ``on_component_registered`` once per call, after the registry
+        accepts the class.
+        """
         self.registry.register(comp_cls, name)
+        registered_name = name or getattr(comp_cls, "name", None) or comp_cls.__name__
+        self.extensions.on_component_registered(registered_name, comp_cls)
 
     def unregister(self, comp_cls_or_name: type[Component] | str) -> None:
-        """Unregister a component. See ``ComponentRegistry.unregister``."""
+        """
+        Unregister a component. See ``ComponentRegistry.unregister``.
+
+        Fires ``on_component_unregistered`` once per call, after the registry
+        removes the class.
+        """
+        # Resolve the class (and a representative name) before removal, so the
+        # hook context is populated whether called by class or by name.
+        if isinstance(comp_cls_or_name, str):
+            comp_cls = self.registry.get(comp_cls_or_name)
+            removed_name = comp_cls_or_name
+        else:
+            comp_cls = comp_cls_or_name
+            removed_name = getattr(comp_cls, "name", None) or comp_cls.__name__
         self.registry.unregister(comp_cls_or_name)
+        self.extensions.on_component_unregistered(removed_name, comp_cls)
 
     def get(self, name: str) -> type[Component]:
         """Look up a component by name. See ``ComponentRegistry.get``."""
@@ -123,9 +161,6 @@ class Citry:
         """Clear all state: registered components, caches, etc."""
         self.registry.clear()
         self._const_body_cache.clear()
-
-    def __repr__(self) -> str:
-        return f"Citry(components={len(self.registry)})"
 
 
 # The default Citry instance, used when Component.citry is not set.

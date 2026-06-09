@@ -26,8 +26,11 @@ class TestCitryInstance:
         assert len(c.components) == 0
 
     def test_settings_stored(self):
-        c = Citry(debug=True, base_dir="/tmp")
-        assert c._settings == {"debug": True, "base_dir": "/tmp"}
+        # Citry now takes a typed settings schema (CitrySettings) rather than
+        # arbitrary kwargs. extensions_defaults is stored on it.
+        c = Citry(extensions_defaults={"view": {"ttl": 60}})
+        assert c.settings.extensions_defaults == {"view": {"ttl": 60}}
+        assert c.settings.extensions == ()
 
     def test_has_registry(self):
         from citry import ComponentRegistry

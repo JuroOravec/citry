@@ -26,3 +26,14 @@ def to_dict(data: Any) -> dict[str, Any]:
         return {f.name: getattr(data, f.name) for f in fields(data)}
 
     return dict(data)
+
+
+def snake_to_pascal(name: str) -> str:
+    """
+    Convert a snake_case name to PascalCase.
+
+    ``my_extension`` -> ``MyExtension``. Used to derive an extension's
+    ``class_name`` (the nested config class users define on a component) from
+    its ``name``.
+    """
+    return "".join(part[:1].upper() + part[1:] for part in name.split("_"))

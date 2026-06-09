@@ -55,8 +55,9 @@ Example:
 
 from __future__ import annotations
 
+from contextlib import suppress
 from dataclasses import dataclass, is_dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from citry.citry import Citry, citry
 from citry.citry_element import CitryElement
@@ -104,7 +105,7 @@ class ComponentMeta(type):
         # is True and we proceed with registration.
         is_component_subclass = any(isinstance(b, ComponentMeta) for b in bases)
         if not is_component_subclass:
-            return super().__new__(mcs, name, bases, attrs)  # type: ignore[return-value]
+            return super().__new__(mcs, name, bases, attrs)
 
         # Convert inner data classes (Kwargs, Slots, TemplateData) to
         # dataclasses if they don't explicitly declare a base class or
@@ -123,20 +124,27 @@ class ComponentMeta(type):
                 continue
             attrs[data_class_name] = dataclass(slots=True)(data_class)
 
-        cls = super().__new__(mcs, name, bases, attrs)
+        cls = cast("type[Component]", super().__new__(mcs, name, bases, attrs))
 
-        # Register with the Citry instance.
-        # Uses the class name (or Component.name override) as the
-        # registration name. The Citry.register() method handles
-        # normalization (lowercasing, kebab-case derivation) and
-        # duplicate detection.
-        citry_instance = getattr(cls, "citry", None)
-        if citry_instance is None:
-            citry_instance = citry
-            cls.citry = citry_instance  # type: ignore[attr-defined]
-        citry_instance.register(cls)  # type: ignore[arg-type]
+        # Resolve the Citry instance: an explicit ``citry`` field on the class,
+        # or the inherited default (the base ``Component.citry``). Always set.
+        citry_instance = cls.citry
 
-        return cls  # type: ignore[return-value]
+        # Fire the class-created hook and let extensions reparent their nested
+        # config classes (e.g. ``class View:`` -> a subclass of the view
+        # extension's Config), before registration. Extensions are present at
+        # class-definition time, so no deferral is needed (docs/design/extensions.md).
+        extensions = citry_instance.extensions
+        extensions.on_component_class_created(cls)
+        extensions._init_component_class(cls)
+
+        # Register with the Citry instance. Uses the class name (or
+        # Component.name override) as the registration name; Citry.register()
+        # handles normalization and duplicate detection and fires
+        # ``on_component_registered``.
+        citry_instance.register(cls)
+
+        return cls
 
     def __call__(cls, /, **kwargs: Any) -> CitryElement:
         """
@@ -177,11 +185,23 @@ class ComponentMeta(type):
 
     def __del__(cls) -> None:
         citry_instance = getattr(cls, "citry", None)
-        if citry_instance is not None:
-            try:
-                citry_instance.unregister(cls)  # type: ignore[arg-type]
-            except Exception:  # noqa: BLE001
-                pass
+        if citry_instance is None:
+            return
+
+        # __del__ runs at GC / interpreter shutdown, where the Citry instance or
+        # its extension manager may already be torn down. Suppress only the
+        # *access* to the manager, so genuine errors raised inside the hook still
+        # surface rather than being silently swallowed.
+        extensions = None
+        with suppress(Exception):
+            extensions = citry_instance.extensions
+        if extensions is not None:
+            extensions.on_component_class_deleted(cls)  # type: ignore[arg-type]
+
+        # The class may never have been registered, or the registry may be torn
+        # down at shutdown; unregistering is best-effort here.
+        with suppress(Exception):
+            citry_instance.unregister(cls)  # type: ignore[arg-type]
 
 
 class Component(metaclass=ComponentMeta):
@@ -197,11 +217,11 @@ class Component(metaclass=ComponentMeta):
     ``template`` (inline string) or ``template_file`` (path to file).
     """
 
-    citry: ClassVar[Citry | None] = None
+    citry: ClassVar[Citry] = citry
     """The Citry instance this component is registered with.
 
-    Set this to assign the component to a specific Citry instance.
-    If not set, the component is assigned to the default instance.
+    Defaults to the module-level default instance. Set this to assign the
+    component to a specific Citry instance instead.
     """
 
     name: ClassVar[str | None] = None

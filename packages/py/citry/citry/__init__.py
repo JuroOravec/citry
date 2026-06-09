@@ -16,6 +16,22 @@ from citry.citry_render import CitryRender
 from citry.component import Component
 from citry.component_registry import AlreadyRegistered, ComponentRegistry, NotRegistered
 from citry.constness import Const
+from citry.extension import (
+    Extension,
+    ExtensionCommand,
+    ExtensionConfig,
+    ExtensionManager,
+    OnComponentClassCreatedContext,
+    OnComponentClassDeletedContext,
+    OnComponentDataContext,
+    OnComponentInputContext,
+    OnComponentRegisteredContext,
+    OnComponentRenderedContext,
+    OnComponentUnregisteredContext,
+    OnExtensionCreatedContext,
+    OnTemplateCompiledContext,
+    OnTemplateLoadedContext,
+)
 from citry.nodes import (
     ComponentNode,
     ExprHtmlAttr,
@@ -30,6 +46,7 @@ from citry.nodes import (
     TemplateHtmlAttr,
     TemplateNode,
 )
+from citry.settings import CitrySettings
 
 __all__ = [
     "AlreadyRegistered",
@@ -37,18 +54,33 @@ __all__ = [
     "CitryContext",
     "CitryElement",
     "CitryRender",
+    "CitrySettings",
     "Component",
     "ComponentNode",
     "ComponentRegistry",
     "Const",
     "ExprHtmlAttr",
     "ExprNode",
+    "Extension",
+    "ExtensionCommand",
+    "ExtensionConfig",
+    "ExtensionManager",
     "FillNode",
     "ForNode",
     "HtmlAttr",
     "IfNode",
     "Node",
     "NotRegistered",
+    "OnComponentClassCreatedContext",
+    "OnComponentClassDeletedContext",
+    "OnComponentDataContext",
+    "OnComponentInputContext",
+    "OnComponentRegisteredContext",
+    "OnComponentRenderedContext",
+    "OnComponentUnregisteredContext",
+    "OnExtensionCreatedContext",
+    "OnTemplateCompiledContext",
+    "OnTemplateLoadedContext",
     "SlotNode",
     "StaticHtmlAttr",
     "TemplateHtmlAttr",

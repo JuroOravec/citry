@@ -96,6 +96,8 @@ def render_impl(
 
     """
     comp_cls = element.comp_cls
+    citry_instance = comp_cls.citry
+    extensions = citry_instance.extensions
 
     # 1. Create component instance with all state.
     #    Uses _create_instance() which bypasses ComponentMeta.__call__
@@ -109,7 +111,15 @@ def render_impl(
         parent=parent,
     )
 
-    # 2. Call template_data() (per-render; intentionally not cached).
+    # 2. Attach the per-component extension configs (eg `component.view`,
+    #    AKA `component.<ext.name>`), then run on_component_input.
+    #    NOTE: the typed component.kwargs / slots are already built in __init__,
+    #    so input mutations land on raw_kwargs / raw_slots but do not yet propagate
+    #    to the typed views; that propagation is deferred (docs/design/extensions.md section 7.1).
+    extensions._init_component_instance(component)
+    extensions.on_component_input(component)
+
+    # 3. Call template_data() (per-render; intentionally not cached).
     #    The return value may be a dict, a NamedTuple, or the component's
     #    typed `TemplateData` dataclass, so normalize it with `to_dict`.
     #    No defensive copy is needed (unlike kwargs/slots): the data is
@@ -125,7 +135,10 @@ def render_impl(
     if template_data_cls is not None and not isinstance(maybe_data, template_data_cls):
         template_data_cls(**tpl_data)
 
-    # 3. Build the render-scoped context. ``variables`` are the template
+    # 4. on_component_data: extensions may add/modify template variables.
+    extensions.on_component_data(component, tpl_data)
+
+    # 5. Build the render-scoped context. ``variables`` are the template
     #    variables (the template_data output); ``extra`` is the tree-wide
     #    scratch space extensions will populate (deps, etc.) - empty for now.
     #    The Const markers stay in ``variables`` so they flow down to descendant
@@ -134,7 +147,7 @@ def render_impl(
     #    the underlying value.
     context = CitryContext(variables=tpl_data, component=component)
 
-    # 4. Build the body (node list). The body-generating function is
+    # 6. Build the body (node list). The body-generating function is
     #    parsed+compiled+exec'd once per component class (cached on the class).
     #    The body is then loaded from the Citry-scoped cache keyed by the
     #    component class plus the *const signature* (which context variables are
@@ -142,20 +155,37 @@ def render_impl(
     #    signature (no folding), so every signature maps to an equivalent node
     #    list for now; this wires up the const flow so folding can slot in
     #    later. See docs/design/constness.md.
+    #
+    #    on_template_compiled fires here (per built body, before caching), so an
+    #    extension can transform the node list once and have the transform
+    #    cached. See docs/design/extensions.md section 7.4.
     generator = _get_body_generator(comp_cls)
     if generator is None:
-        return CitryRender(parts=[], context=context)
-
-    signature = _const_signature(tpl_data)
-    citry_instance = comp_cls.citry
-    if citry_instance is not None:
-        body = citry_instance._const_body(comp_cls, signature, generator)
+        body: list[BodyItem] = []
     else:
-        body = generator()
 
-    # 5. Walk the body into a parts list and wrap it in a CitryRender.
+        def build() -> list[BodyItem]:
+            return extensions.on_template_compiled(comp_cls, generator())
+
+        # If the template_data() returned any `Const` fields,
+        # this is where we build/load the cached optimized body.
+        signature = _const_signature(tpl_data)
+        body = citry_instance._const_body(comp_cls, signature, build)
+
+    # 7. Walk the body into a parts list and wrap it in a CitryRender.
     parts = _render_body(body, context)
-    return CitryRender(parts=parts, context=context)
+    rendered = CitryRender(parts=parts, context=context)
+
+    # 8. on_component_rendered: extensions may post-process the render (return a
+    #    new CitryRender/str) or replace the result with an error (raise).
+    new_render, error = extensions.on_component_rendered(component, rendered, None)
+    if error is not None:
+        raise error
+    if isinstance(new_render, str):
+        return CitryRender(parts=[new_render], context=context)
+    if new_render is not None:
+        return new_render
+    return rendered
 
 
 def _get_template_string(comp_cls: type[Component]) -> str | None:
@@ -195,6 +225,12 @@ def _get_body_generator(comp_cls: type[Component]) -> Callable[[], list[BodyItem
     """
     if "_template_body_generator" not in comp_cls.__dict__:
         template_str = _get_template_string(comp_cls)
+
+        # on_template_loaded fires once per class, since the generator is cached
+        # on the class. This hook lets extensions modify the template string before parse.
+        if template_str is not None:
+            template_str = comp_cls.citry.extensions.on_template_loaded(comp_cls, template_str)
+
         comp_cls._template_body_generator = _compile_body_generator(template_str) if template_str is not None else None
     return comp_cls.__dict__["_template_body_generator"]
 
