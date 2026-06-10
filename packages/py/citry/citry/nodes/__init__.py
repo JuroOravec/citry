@@ -13,9 +13,10 @@ boundary: attributes become the child's kwargs, and its body content becomes
 the child's slots (the implicit default slot, or the collected ``<c-fill>``
 tags; see docs/design/slots.md section 4). The control-flow nodes (``IfNode``,
 ``ForNode``) render their matching branch / per-item body. ``SlotNode``
-(resolution at the slot site) is the remaining stub; ``FillNode`` is consumed
-during fill collection and is never rendered directly, so its inherited
-``render`` raising is intentional.
+renders the fill given for the slot, or its own body as the fallback (see
+docs/design/slots.md section 5). ``FillNode`` is consumed during fill
+collection and is never rendered directly, so its inherited ``render``
+raising is intentional.
 
 See the compiler module docstring in
 ``crates/citry_template_parser/src/compiler.rs`` for the full node taxonomy
@@ -60,6 +61,7 @@ Example:
 from __future__ import annotations
 
 from collections.abc import Mapping
+from difflib import get_close_matches
 from typing import TYPE_CHECKING, Any, TypeAlias, final
 
 from typing_extensions import override
@@ -770,7 +772,7 @@ class ForNode(Node):
 @final
 class SlotNode(Node):
     """
-    A slot definition (``<c-slot>``).
+    A slot definition (``<c-slot>``): the insertion point for slot content.
 
     Generated as::
 
@@ -780,6 +782,10 @@ class SlotNode(Node):
         Template ``<c-slot name="header" />`` produces::
 
             SlotNode(source, (0, 24,), (StaticHtmlAttr(...),), [], (), ())
+
+    Rendering resolves the slot name, looks up the fill the component
+    received, and invokes it with the slot data; with no fill, the slot's own
+    body renders as the fallback. See docs/design/slots.md section 5.
 
     """
 
@@ -798,6 +804,101 @@ class SlotNode(Node):
         self.body = body
         self.used_vars = used_vars
         self.introduced_vars = introduced_vars
+
+    @override
+    def render(self, context: CitryContext) -> RenderPart:
+        """
+        Render the fill given for this slot, or the slot's own body as fallback.
+
+        The slot data (the tag's extra attributes) resolves against the current
+        context per render of this site, so a slot inside a loop passes
+        per-iteration data. The fill and the fallback render through the same
+        path: both are Slots, invoked with ``(data, fallback)``. A fill renders
+        against the scope where it was written (it closed over it at
+        collection); the fallback body renders against the current context, as
+        if the ``<c-slot>`` tags were not there.
+
+        A required slot with no fill raises, with a "did you mean" hint over
+        the fills the component received.
+        """
+        component = context.component
+        if component is None:
+            msg = "SlotNode.render requires a component context bound to a Citry instance."
+            raise RuntimeError(msg)
+
+        name, required, data = self._resolve_props(context)
+        fills = component.raw_slots
+        fill = fills.get(name)
+
+        # The slot's own body, as a Slot: the fallback handle when a fill
+        # exists, the rendered content when none does.
+        body_slot = _make_body_slot(self.body, context, type(component).__name__, name, None, None, self.position)
+
+        if fill is not None:
+            slot_used = fill
+            part = fill(data, fallback=body_slot)
+        else:
+            if required:
+                msg = (
+                    f"Slot {name!r} of component {type(component).__name__!r} is marked as "
+                    "required, but no fill was provided."
+                )
+                close = get_close_matches(name, list(fills), n=1, cutoff=0.7)
+                if close:
+                    msg += f" Did you mean {close[0]!r}?"
+                raise RuntimeError(msg)
+            slot_used = body_slot
+            part = body_slot(data)
+
+        return component.citry.extensions.on_slot_rendered(
+            component=component,
+            slot=slot_used,
+            slot_name=name,
+            slot_node=self,
+            slot_is_required=required,
+            result=part,
+        )
+
+    def _resolve_props(self, context: CitryContext) -> tuple[str, bool, dict[str, Any]]:
+        """
+        Resolve the slot's attributes to ``(name, required, data)``.
+
+        Attributes are applied left to right, so the rightmost write wins:
+        ``name``/``required`` are static, ``c-name``/``c-required`` are
+        evaluated, and ``c-bind`` spreads a mapping (its ``name`` and
+        ``required`` keys land on the slot; everything else is slot data).
+        Every remaining attribute is slot data, with the ``c-`` prefix dropped
+        from evaluated keys, the same rule as component kwargs.
+        """
+        name: Any = "default"
+        required: Any = False
+        data: dict[str, Any] = {}
+        for attr in self.attrs:
+            key = attr.key
+            if key == "c-bind":
+                spread = attr.resolve(context)
+                if not isinstance(spread, Mapping):
+                    msg = f"'c-bind' on <c-slot> must resolve to a mapping, got {type(spread).__name__}."
+                    raise RuntimeError(msg)
+                for spread_key, spread_value in spread.items():
+                    if spread_key == "name":
+                        name = spread_value
+                    elif spread_key == "required":
+                        required = spread_value
+                    else:
+                        data[spread_key] = spread_value
+            elif key in ("name", "c-name"):
+                name = attr.resolve(context)
+            elif key in ("required", "c-required"):
+                required = attr.resolve(context)
+            else:
+                data[key.removeprefix("c-")] = attr.resolve(context)
+
+        if not isinstance(name, str) or not name:
+            msg = f"<c-slot> 'name' must resolve to a non-empty string, got {name!r}."
+            raise RuntimeError(msg)
+
+        return name, bool(required), data
 
     def __repr__(self) -> str:
         return f"SlotNode(attrs={len(self.attrs)})"

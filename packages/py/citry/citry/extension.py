@@ -39,9 +39,10 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from citry.citry import Citry
-    from citry.citry_render import CitryRender
+    from citry.citry_render import CitryRender, RenderPart
     from citry.component import Component
-    from citry.nodes import BodyItem
+    from citry.nodes import BodyItem, SlotNode
+    from citry.slots import Slot
 
 
 ################################################
@@ -132,6 +133,24 @@ class OnComponentRenderedContext:
     """The rendered output, or ``None`` if rendering failed."""
     error: Exception | None
     """The error raised during rendering, or ``None`` if it succeeded."""
+
+
+@dataclass(frozen=True, slots=True)
+class OnSlotRenderedContext:
+    citry: Citry
+    """The ``Citry`` instance the component belongs to."""
+    component: Component
+    """The component whose template holds the ``<c-slot>`` that was rendered."""
+    slot: Slot
+    """The Slot that was rendered: the fill, or the fallback when no fill was given."""
+    slot_name: str
+    """The resolved slot name (``"default"`` for an unnamed slot)."""
+    slot_node: SlotNode
+    """The runtime ``SlotNode`` at whose site the slot rendered."""
+    slot_is_required: bool
+    """Whether the slot resolved as required."""
+    result: RenderPart
+    """The rendered output (a ``str`` or a ``CitryRender``)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +327,14 @@ class Extension:
         Called after a component (and its children) rendered. Return a new
         ``CitryRender`` / ``str`` to replace the output, raise to replace the
         error, or return ``None`` to keep the original.
+        """
+
+    def on_slot_rendered(self, ctx: OnSlotRenderedContext) -> RenderPart | None:
+        """
+        Called after a ``<c-slot>`` site rendered (a fill, or the fallback).
+
+        Return a new render part (``str`` or ``CitryRender``) to replace the
+        output, or ``None`` to keep the original. Raising propagates.
         """
 
     # ----- Template -----
@@ -618,6 +645,34 @@ class ExtensionManager:
                 if out is not None:
                     ctx = replace(ctx, render=out, error=None)
         return ctx.render, ctx.error
+
+    def on_slot_rendered(
+        self,
+        component: Component,
+        slot: Slot,
+        slot_name: str,
+        slot_node: SlotNode,
+        slot_is_required: bool,
+        result: RenderPart,
+    ) -> RenderPart:
+        """
+        Thread a slot's rendered output through the extensions; a return
+        replaces the result, a raise propagates.
+        """
+        return self.emit(
+            "on_slot_rendered",
+            OnSlotRenderedContext(
+                citry=self.citry,
+                component=component,
+                slot=slot,
+                slot_name=slot_name,
+                slot_node=slot_node,
+                slot_is_required=slot_is_required,
+                result=result,
+            ),
+            result="map",
+            field="result",
+        )
 
     # ----- Template hooks -----
 

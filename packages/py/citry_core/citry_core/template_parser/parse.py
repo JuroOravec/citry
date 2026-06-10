@@ -15,7 +15,9 @@ def parse_template(
         lang: Expression language. One of "python" (default), "js", "php",
             "go", "rust".
         user_rules: Optional dict mapping tag names to TagRules for custom
-            attribute/slot validation.
+            attribute/slot validation. Keys must be lowercase tag names
+            (e.g. ``"c-my-card"``); tags in the template match the rules
+            case-insensitively.
 
     Returns:
         The parsed Template AST.

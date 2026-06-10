@@ -1,10 +1,11 @@
 # Design: slots and fills
 
-**Status (2026-06-10): design agreed; built so far: the section 11 parser
-fixes, the `Slot` value (section 3), fill collection and the Python `slots=`
-channel (sections 4 and 9), and the queue + serializer handling of fill
-content (section 8). Not started: slot resolution at `<c-slot>` (section 5)
-and the `on_slot_rendered` hook (section 7).** This document specifies the
+**Status (2026-06-10): built.** All phases are implemented: the section 11
+parser fixes, the `Slot` value (section 3), fill collection and the Python
+`slots=` channel (sections 4 and 9), the queue + serializer handling of fill
+content (section 8), slot resolution at `<c-slot>` (section 5), and the
+`on_slot_rendered` hook (section 7). The README's slot examples work end to
+end. This document specifies the
 slot subsystem: the `Slot` value, how `<c-fill>` content travels from a parent
 template into a child component, how `<c-slot>` resolves it, the Python-side
 `slots=` input, and how all of it interacts with the deferred render queue. It
@@ -536,6 +537,25 @@ Port the type aliases: `SlotResult` (`str | SafeString` extended with
 `SlotInput[TSlotData]` (`SlotResult | SlotFunc | Slot | CitryElement |
 CitryRender`). The deprecated DJC aliases are not carried.
 
+### 9.4 What is exported where
+
+The package root (`citry/__init__.py`, its `__all__`) is the public API, and
+only those names are promised not to break between releases; submodules
+(`citry.slots`, `citry.nodes`, ...) may be imported from, but their contents
+are internal and free to change. For the slot subsystem that means:
+
+- **Root (stable):** `Slot`, `SlotContext`, and the typing aliases
+  (`SlotInput`, `SlotResult`, `SlotFunc`), which component authors use to
+  pass slots and type their `Slots` classes. The runtime node classes are
+  also root exports: constructing nodes and editing a template body in the
+  `on_template_compiled` extension hook is a recognized user journey.
+- **Internal (in their modules):** `normalize_slot_fills` (the framework
+  already normalizes at every boundary it owns; for single values the user
+  API is the `Slot(...)` constructor; the dict-level rules are boundary
+  contract the framework may evolve), and `FillSink` /
+  `collect_fills_from_body` (collection machinery behind
+  `Node.collect_fills`).
+
 ---
 
 ## 10. Prop templates vs slots
@@ -746,9 +766,13 @@ contract and cannot be cut cleanly), preceded by the parser fixes:
    collection and rendering share the branch/iteration logic. Includes the
    11.4a parser relaxation. Tests in `tests/test_slot_fills.py`; until phase
    4, slots are consumed via `template_data(kwargs, slots)` + `{{ slot_var }}`.
-4. **Resolution**: `SlotNode.render` (section 5), `FillNode.render` stays
-   unreachable in normal flow (fills are consumed at collection; reaching
-   `FillNode.render` means a parser/runtime bug and keeps raising).
+4. **Done.** Resolution: `SlotNode.render` (section 5) with the
+   `on_slot_rendered` hook (section 7); the fill and the fallback render
+   through one path (both are Slots, invoked with ``(data, fallback)``).
+   `FillNode.render` stays unreachable in normal flow (fills are consumed at
+   collection; reaching `FillNode.render` means a parser/runtime bug and
+   keeps raising). Tests in `tests/test_slot_node.py`, including the README
+   examples verbatim.
 5. **Done** (with phase 3; collection makes fills invocable, so components
    inside slot content need it immediately). Queue fix: `_scan_deferred`
    descend-everywhere + lexical-owner merge target, plus the

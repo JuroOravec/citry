@@ -5,6 +5,11 @@
 # that the V3 compiler output instantiates.
 #
 # For the Rust-powered parser and compiler, see citry_core.
+#
+# API stability: the names exported HERE (listed in __all__) are the public
+# API, and only these are promised not to break between releases. Submodules
+# (citry.slots, citry.nodes, ...) may be imported from, but their contents
+# are internal and free to change between releases.
 
 from citry.citry import (
     Citry,
@@ -53,7 +58,6 @@ from citry.slots import (
     SlotFunc,
     SlotInput,
     SlotResult,
-    normalize_slot_fills,
 )
 
 __all__ = [
@@ -99,5 +103,4 @@ __all__ = [
     "TemplateHtmlAttr",
     "TemplateNode",
     "citry",
-    "normalize_slot_fills",
 ]

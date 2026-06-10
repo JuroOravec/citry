@@ -1390,6 +1390,64 @@ get_template(Card).source        # file content, hooks applied
 get_media(Card).js               # merged, absolute paths
 ```
 
+### Slot resolution at `<c-slot>` and the `on_slot_rendered` hook (`nodes/__init__.py`, `extension.py`)
+
+**What:** `SlotNode.render` resolves the slot site: name (static, `c-name`,
+or via `c-bind`; missing name means `"default"`), `required` (static flag or
+dynamic `c-required`), and every remaining attribute as slot data (`c-`
+prefix dropped from evaluated keys, the same rule as component kwargs; data
+resolves per render of the site, so a slot in a loop passes per-iteration
+data). It then invokes the fill the component received, or its own body as
+the fallback, and threads the result through the new `on_slot_rendered`
+extension hook. This completes [`slots.md`](slots.md): slots work end to end
+through templates alone, and the README's slot examples are tests.
+
+**Why:** This is the consumption half of the slot system; collection (the
+earlier entry) produced the Slots, this renders them at their insertion
+points.
+
+**Design decisions:**
+- **One invocation path.** The fill and the fallback are both Slots, invoked
+  with ``(data, fallback)``. On a hit, the slot's own body is wrapped as the
+  fallback handle; on a miss, that same wrapper IS the rendered slot (with
+  ``fallback=None``). This mirrors django-components' unfilled path (which
+  also wraps the body as a Slot) and gives `on_slot_rendered` a `Slot` in
+  both cases.
+- **Scoping rules hold at the site.** The fill renders against the scope it
+  closed over at collection (the writer's); the fallback renders against the
+  current context, as if the `<c-slot>` tags were not there. Passthrough
+  slots and slots inside slot fallbacks fall out with no extra code.
+- **Required is render-time.** Only a *rendered* slot can complain: a
+  required slot in an untaken branch never errors (django-components
+  parity), and the error carries a `difflib` "did you mean" hint over the
+  fills the component received.
+- **`on_slot_rendered`** follows the established manager patterns: a frozen
+  `OnSlotRenderedContext` (`citry`, `component`, `slot`, `slot_name`,
+  `slot_node`, `slot_is_required`, `result`), dispatched with
+  `emit(result="map", field="result")`, so a returned render part replaces
+  the output and a raise propagates. There is no `slot_is_default` field:
+  the default slot is the one named `"default"`.
+
+**Usage:**
+
+```python
+class Modal(Component):
+    template = """
+        <div class="modal">
+          <main><c-slot /></main>
+          <footer><c-slot name="actions" required /></footer>
+        </div>
+    """
+
+class Page(Component):
+    template = '''
+        <c-modal>
+          <c-fill name="default"><p>Are you sure?</p></c-fill>
+          <c-fill name="actions"><button>OK</button></c-fill>
+        </c-modal>
+    '''
+```
+
 ## Impl notes (things to be done)
 
 - DO NOT PASS CONTEXT BETWEEN NODES. ONLY PROPS AND SLOTS.
