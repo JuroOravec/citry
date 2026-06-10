@@ -148,20 +148,30 @@ class DeferredComponent:
             ``<c-for>`` keeps the right value.
         parent: The parent ``Component`` instance. Used to set the child's
             ``parent``/``root`` links when it is rendered.
+        provides: The provide/inject entries active where the ``<c-child>``
+            tag sits, read while the parent is still rendering, at the same
+            time as the kwargs (see docs/design/provide.md section 4.2). The
+            child inherits these when the queue renders it.
 
     """
 
-    __slots__ = ("element", "parent")
+    __slots__ = ("element", "parent", "provides")
 
-    def __init__(self, element: CitryElement, parent: Component) -> None:
+    def __init__(
+        self,
+        element: CitryElement,
+        parent: Component,
+        provides: dict[str, Any] | None = None,
+    ) -> None:
         self.element = element
         self.parent = parent
+        self.provides = provides if provides is not None else {}
 
     def __repr__(self) -> str:
         return f"DeferredComponent({self.element!r})"
 
 
-def _render_value(value: Any) -> RenderPart:
+def _render_value(value: Any, provides: dict[str, Any] | None = None) -> RenderPart:
     """
     Convert an evaluated expression value into a body part.
 
@@ -183,13 +193,22 @@ def _render_value(value: Any) -> RenderPart:
       trusted HTML, and the surrounding ``_render_body`` merges its dependencies.
     - Anything else is autoescaped. ``escape`` respects the ``__html__``
       protocol, so a ``SafeString`` (trusted HTML) passes through unescaped.
+
+    ``provides`` are the provide/inject entries active where the value was
+    found; an element rendered here inherits them, so a component embedded
+    via ``{{ element }}`` or slot content can ``inject`` what its render site
+    provides (docs/design/provide.md section 4.4).
     """
     if value is None:
         return ""
     if isinstance(value, Slot):
-        return value()
+        return value(provides=provides)
     if isinstance(value, CitryElement):
-        value = value.render()
+        # Imported here, not at module load: component_render imports this
+        # module, so a top-level import back into it would be circular.
+        from citry.component_render import render_impl  # noqa: PLC0415
+
+        value = render_impl(value, provides=provides)
     if isinstance(value, CitryRender):
         return value
     return escape(value)

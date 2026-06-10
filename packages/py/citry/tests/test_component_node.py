@@ -50,7 +50,7 @@ class TestComponentNodeAttrs:
             citry = c
             template = "<span>{{ out }}</span>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"out": kwargs.get(var)}
 
         return Card
@@ -73,7 +73,7 @@ class TestComponentNodeAttrs:
             citry = c
             template = '<main><c-card c-title="who" /></main>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"who": "World"}
 
         assert Page().render().serialize() == '<main data-cid-c1=""><span data-cid-c2="">World</span></main>'
@@ -95,14 +95,14 @@ class TestComponentNodeAttrs:
             citry = c
             template = "<span>{{ a }}-{{ b }}</span>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"a": kwargs["a"], "b": kwargs["b"]}
 
         class Page(Component):
             citry = c
             template = '<main><c-card c-bind="extra" /></main>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"extra": {"a": 1, "b": 2}}
 
         assert Page().render().serialize() == '<main data-cid-c1=""><span data-cid-c2="">1-2</span></main>'
@@ -117,7 +117,7 @@ class TestComponentNodeAttrs:
             citry = c
             template = '<main><c-card c-title="raw" /></main>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"raw": "<b>"}
 
         assert Page().render().serialize() == '<main data-cid-c1=""><span data-cid-c2="">&lt;b&gt;</span></main>'
@@ -131,14 +131,14 @@ class TestComponentNodeAttrs:
             citry = c
             template = "<span>{{ body }}</span>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"body": kwargs["body"]}
 
         class Page(Component):
             citry = c
             template = '<main><c-card c-body="<b>{{ x }}</b>" /></main>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"x": "hi"}
 
         # The prop template renders in Page's scope but is interior content of
@@ -160,7 +160,7 @@ class TestComponentNodeBoundary:
             citry = c
             template = "<main><c-card /></main>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"x": "parent-only"}
 
         with pytest.raises(KeyError):
@@ -174,7 +174,7 @@ class TestComponentNodeBoundary:
             citry = c
             template = "<span>x</span>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 seen["parent"] = self.parent
                 seen["root"] = self.root
                 return {}

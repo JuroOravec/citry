@@ -219,13 +219,24 @@ def _make_body_slot(
     ``fallback`` variable names; the overlay context shares the captured
     ``extra`` bag, so dependencies collected while the fill renders reach
     the fill's lexical owner.
+
+    Provide/inject entries are the one part of the scope that does NOT come
+    from the capture alone: when the body renders at a ``<c-slot>`` site, the
+    provides active at that site extend (and on a key collision win over) the
+    captured ones, so a component inside the body can inject what the slot's
+    owner provides around the slot. Invoked standalone (no slot site), the
+    body keeps the captured provides. See docs/design/provide.md section 4.3.
     """
     # Imported lazily: component_render imports the node classes, so importing
     # the body walker at module load would be circular.
     from citry.component_render import _render_body  # noqa: PLC0415
 
     def content_func(ctx: Any) -> CitryRender:
-        if data_var is not None or fallback_var is not None:
+        provides = context.provides
+        if ctx.provides is not None and ctx.provides is not provides:
+            provides = {**provides, **ctx.provides} if provides else ctx.provides
+
+        if data_var is not None or fallback_var is not None or provides is not context.provides:
             overlay: dict[str, Any] = {}
             if data_var is not None:
                 overlay[data_var] = ctx.data
@@ -235,6 +246,7 @@ def _make_body_slot(
                 variables={**context.variables, **overlay},
                 extra=context.extra,
                 component=context.component,
+                provides=provides,
             )
         else:
             render_context = context
@@ -279,7 +291,10 @@ class ExprNode(Node):
         if self._eval is None:
             self._eval = safe_eval(self.expr)
         value = self._eval(context.variables)
-        return _render_value(value)
+        # An element or Slot found in the expression renders with the
+        # provide/inject entries active here, so it can inject what this
+        # render site provides (docs/design/provide.md section 4.4).
+        return _render_value(value, provides=context.provides)
 
     @override
     def collect_fills(self, context: CitryContext, sink: FillSink) -> None:
@@ -543,7 +558,10 @@ class ComponentNode(Node):
         slots = self._collect_slots(context)
         child_cls = component.citry.get(self.name)
         element = CitryElement(child_cls, kwargs, slots)
-        return DeferredComponent(element, component)
+        # The active provide/inject entries are captured now, like the kwargs:
+        # the child renders later (through the queue), when this context is
+        # gone, but must still inherit what was provided around its tag.
+        return DeferredComponent(element, component, context.provides)
 
     def _resolve_kwargs(self, context: CitryContext) -> dict[str, Any]:
         """
@@ -740,6 +758,7 @@ class ForNode(Node):
                 variables={**context.variables, **dict(zip(targets, values, strict=True))},
                 extra=context.extra,
                 component=context.component,
+                provides=context.provides,
             )
             yield body, child
 
@@ -844,7 +863,10 @@ class SlotNode(Node):
 
         if fill is not None:
             slot_used = fill
-            part = fill(data, fallback=body_slot)
+            # The provides active at this slot site travel into the fill, so
+            # components inside the fill body can inject what this component
+            # provides around the slot (docs/design/provide.md section 4.3).
+            part = fill(data, fallback=body_slot, provides=context.provides)
         else:
             if required:
                 msg = (
@@ -856,7 +878,7 @@ class SlotNode(Node):
                     msg += f" Did you mean {close[0]!r}?"
                 raise RuntimeError(msg)
             slot_used = body_slot
-            part = body_slot(data)
+            part = body_slot(data, provides=context.provides)
 
         return component.citry.extensions.on_slot_rendered(
             component=component,

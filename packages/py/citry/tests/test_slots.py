@@ -139,7 +139,7 @@ class TestSlotInExpressions:
             citry = c
             template = "<div>{{ s }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"s": Slot("hello")}
 
         assert str(Page()) == '<div data-cid-c1="">hello</div>'
@@ -151,7 +151,7 @@ class TestSlotInExpressions:
             citry = c
             template = "<div>{{ s }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"s": Slot("<b>unsafe</b>")}
 
         assert str(Page()) == '<div data-cid-c1="">&lt;b&gt;unsafe&lt;/b&gt;</div>'
@@ -163,7 +163,7 @@ class TestSlotInExpressions:
             citry = c
             template = "<div>{{ s(d) }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {
                     "s": Slot(lambda ctx: f"Hello, {ctx.data['name']}!"),
                     "d": {"name": "Jo"},
@@ -182,7 +182,7 @@ class TestSlotInExpressions:
             citry = c
             template = "<div>{{ s }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"s": Slot(Inner())}
 
         # Page renders first (c1), then the embedded element renders (c2).

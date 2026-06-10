@@ -9,7 +9,9 @@ from citry import citry as default_citry
 class TestCitryInstance:
     def test_create_empty(self):
         c = Citry()
-        assert len(c.components) == 0
+        # A fresh instance carries exactly the built-in components (created
+        # lazily on the first lookup), nothing else.
+        assert set(c.components) == {"provide"}
 
     def test_repr(self):
         c = Citry()
@@ -21,9 +23,10 @@ class TestCitryInstance:
         class A(Component):
             citry = c
 
-        assert len(c.components) >= 1
+        assert "a" in c.components
         c.clear()
-        assert len(c.components) == 0
+        # User components are gone; the built-ins are recreated on lookup.
+        assert set(c.components) == {"provide"}
 
     def test_settings_stored(self):
         # Citry now takes a typed settings schema (CitrySettings) rather than

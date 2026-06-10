@@ -33,7 +33,7 @@ class TestConstFlow:
             citry = c
             template = "<p>hi</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"cols": kwargs["cols"]}
 
         assert Card(cols=Const(3)).render().serialize() == '<p data-cid-c1="">hi</p>'
@@ -45,7 +45,7 @@ class TestConstFlow:
             citry = c
             template = "<p>hi</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"cols": kwargs["cols"]}
 
         # Different const values -> different signatures -> two cache entries.
@@ -64,7 +64,7 @@ class TestConstFlow:
             citry = c
             template = "<p>hi</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"cols": kwargs["cols"]}
 
         # Plain (non-Const) values do not enter the signature, so both renders
@@ -82,7 +82,7 @@ class TestConstFlow:
             citry = c
             template = "<p>hi</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"cols": kwargs["cols"]}
 
         Card(cols=Const(3)).render()
@@ -110,7 +110,7 @@ class TestConstFlow:
             citry = c
             template = "<p>hi</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"rows": kwargs["rows"]}
 
         # A list is unhashable; the signature falls back to a repr stand-in.

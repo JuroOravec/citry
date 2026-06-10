@@ -27,6 +27,9 @@ Citry is:
 - **Simple** - Just 2 rules and 12 special tags
 - **Fast** - Rust-powered parsing
 - **Safe** - Expressions are sandboxed to block dangerous operations
+- **Reliable** - Typo'd slot names and missing props fail when the template
+  is compiled, with a precise source location - not at render time in
+  production
 - **Universal** - One template language for your entire stack
 
 ## Two simple rules
@@ -331,6 +334,43 @@ Slots can expose data to the fill, similar to Vue's scoped slots.
   </c-fill>
 </c-MyComponent>
 ```
+
+## Typed components catch errors early
+
+A component can declare its inputs with plain annotated classes:
+
+```python
+from citry import Component, SlotInput
+
+class Card(Component):
+    template = '<div>{{ title }}<c-slot name="header" /></div>'
+
+    class Kwargs:
+        title: str          # required
+        size: int = 10      # optional
+
+    class Slots:
+        header: SlotInput
+```
+
+The declarations double as a contract for every template that **uses** the
+component. Mistakes fail when the template is compiled, pointing at the exact
+spot in the template source, instead of surfacing at render time (or not at
+all):
+
+```html
+<!-- Each of these is a template compile error: -->
+<c-Card title="Hi" bogus="1" />          <!-- unknown prop -->
+<c-Card />                               <!-- missing required `title` -->
+<c-Card title="Hi">
+  <c-fill name="headr">...</c-fill>      <!-- typo'd slot name -->
+</c-Card>
+```
+
+This is possible because fills and props are part of the template's
+structure, not strings resolved mid-render. Dynamic usage stays flexible:
+`c-bind` spreads and dynamic slot names (`c-name`) are checked at render
+time instead.
 
 ## Comments
 

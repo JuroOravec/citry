@@ -62,6 +62,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 from citry.citry import Citry, citry
 from citry.citry_element import CitryElement
 from citry.component_render import gen_render_id
+from citry.provide import MISSING, inject_value, make_provided, validate_provide_key
 from citry.slots import Slot, normalize_slot_fills
 from citry.util.misc import to_dict
 
@@ -233,6 +234,17 @@ class Component(metaclass=ComponentMeta):
     component to a specific Citry instance instead.
     """
 
+    transparent: ClassVar[bool] = False
+    """Whether this component's output joins the surrounding component's
+    serialization frame.
+
+    A transparent component is structural rather than visual: its rendered
+    output gets no ``data-cid-<id>`` marker and is not framed as a child
+    component at serialize time. Used by built-ins like ``<c-provide>`` that
+    only wrap content. Hooks, the render id, and dependency merging behave
+    the same as for any component.
+    """
+
     name: ClassVar[str | None] = None
     """Override the name under which this component is registered.
 
@@ -323,6 +335,16 @@ class Component(metaclass=ComponentMeta):
     For root components, ``self.root is self``. Never None.
     """
 
+    _provides_inherited: dict[str, Any]
+    """Internal: the provide/inject entries this instance inherited from the
+    render path above it (captured where its tag sits). Read by ``inject``.
+    """
+
+    _provides_own: dict[str, Any]
+    """Internal: the entries this instance registered via ``provide``, passed
+    on to its descendants (never visible to its own ``inject``).
+    """
+
     def __init__(
         self,
         # The public field is `component.id`, so the parameter shadows the builtin on purpose.
@@ -330,6 +352,7 @@ class Component(metaclass=ComponentMeta):
         kwargs: Any = None,
         slots: Any = None,
         parent: Component | None = None,
+        provides: dict[str, Any] | None = None,
     ) -> None:
         self.id = id if id is not None else gen_render_id()
 
@@ -360,30 +383,96 @@ class Component(metaclass=ComponentMeta):
         self.parent = parent
         self.root = parent.root if parent is not None else self
 
+        # The inherited mapping is shared, not copied: a component that
+        # provides builds a new mapping instead of changing an existing one,
+        # so sharing is safe.
+        self._provides_inherited = provides if provides is not None else {}
+        self._provides_own = {}
+
     # The base implementation ignores its arguments (it returns None); they are
     # the documented signature for subclasses to override, hence the noqa's.
     def template_data(
         self,
         kwargs: Any,  # noqa: ARG002
         slots: Any | None = None,  # noqa: ARG002
-        context: Any | None = None,  # noqa: ARG002
     ) -> dict[str, Any] | None:
         """
-        Return the template context variables.
+        Return the template variables.
 
         Override this to map component inputs to template variables.
-        The returned dict is used as the rendering context.
+        The returned dict is what the template's expressions see.
 
         Args:
             kwargs: The keyword arguments passed to the component.
             slots: The slot fills passed to the component.
-            context: The parent rendering context (if any).
 
         Returns:
-            A dict of template variables, or None to use kwargs directly.
+            A dict of template variables, or None for no variables.
 
         """
         return None
+
+    def provide(self, key: str, /, **data: Any) -> None:
+        """
+        Make ``data`` available to this component's descendants.
+
+        Any component rendered below this one (including components inside
+        slot content rendered below it) can read the data with
+        ``self.inject(key)``. The data does NOT enter the template variables;
+        descendants opt in explicitly. See docs/design/provide.md.
+
+        Call this from ``template_data``. The data is frozen into an
+        immutable payload at this point, so what descendants inject always
+        has exactly the fields given here, as attributes::
+
+            class Page(Component):
+                template = '<c-user-card />'
+
+                def template_data(self, kwargs, slots=None):
+                    self.provide("user_data", user=kwargs["user"])
+                    return {}
+
+            class UserCard(Component):
+                template = '<div>{{ name }}</div>'
+
+                def template_data(self, kwargs, slots=None):
+                    return {"name": self.inject("user_data").user}
+
+        In templates, the same thing is written with the ``<c-provide>``
+        built-in component: ``<c-provide key="user_data" c-user="user">``.
+
+        Args:
+            key: Name the data is provided under (a non-empty identifier).
+                Positional-only, so a data field named ``key`` is allowed.
+            **data: The provided fields.
+
+        """
+        validate_provide_key(key)
+        self._provides_own[key] = make_provided(data)
+
+    def inject(self, key: str, default: Any = MISSING) -> Any:
+        """
+        Read data a component above this one provided under ``key``.
+
+        The data must have been provided by a component on the render path
+        above this one (via ``Component.provide`` or the ``<c-provide>``
+        built-in); the nearest provider wins when the same key is provided
+        twice. A component's own ``provide`` calls are visible to its
+        descendants only, never to its own ``inject``.
+
+        The returned payload is immutable, with the provided fields as
+        attributes: ``self.inject("user_data").user``. Works during
+        ``template_data`` and keeps working after the render for as long as
+        the component instance is kept.
+
+        Args:
+            key: The name the data was provided under.
+            default: Returned when nothing was provided under ``key``. An
+                explicit ``None`` works. Without a default, a missing key
+                raises ``KeyError``.
+
+        """
+        return inject_value(self._provides_inherited, key, default, type(self).__name__)
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)

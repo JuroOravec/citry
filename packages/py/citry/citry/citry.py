@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from citry.component_registry import ComponentRegistry
+from citry.component_registry import AlreadyRegistered, ComponentRegistry, _normalize_name, _pascal_to_kebab
 from citry.extension import ExtensionManager
 from citry.settings import CitrySettings
 from citry.tag_rules import build_tag_rules
@@ -81,7 +81,10 @@ class Citry:
             extensions=tuple(extensions),
             extensions_defaults=dict(extensions_defaults) if extensions_defaults is not None else {},
         )
-        self.registry = ComponentRegistry()
+        # The registry creates the built-in components (<c-provide>, ...) on
+        # its first lookup, through this factory, so they exist in every
+        # Citry instance. See ComponentRegistry._ensure_builtins.
+        self.registry = ComponentRegistry(builtins_factory=self._create_builtin_components)
         # Const-keyed body cache: (component class, const signature) -> body.
         # Skeleton for the const-folding feature (docs/design/constness.md);
         # the body is not yet specialized per signature.
@@ -146,6 +149,20 @@ class Citry:
     def components(self) -> dict[str, type[Component]]:
         """All registered components as a name -> class mapping."""
         return self.registry.all()
+
+    def _create_builtin_components(self) -> None:
+        """
+        Create this instance's built-in components (the registry's factory).
+
+        Called by the registry on its first component lookup (see
+        ``ComponentRegistry._ensure_builtins``). Defining the built-in
+        classes registers them through the normal metaclass path.
+        """
+        # Imported here, not at module load: component.py (which the built-in
+        # components are made of) imports this module.
+        from citry.components import make_builtin_components  # noqa: PLC0415
+
+        make_builtin_components(self)
 
     def _tag_rules(self) -> dict[str, TagRules]:
         """

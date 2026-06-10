@@ -50,14 +50,14 @@ class TestLoopVarKwargs:
             citry = c
             template = "<b>{{ n }}</b>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"n": kwargs["n"]}
 
         class Page(Component):
             citry = c
             template = '<ul><c-for each="i in items"><c-card c-n="i" /></c-for></ul>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"items": [1, 2, 3]}
 
         assert Page().render().serialize() == (

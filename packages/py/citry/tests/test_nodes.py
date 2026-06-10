@@ -20,7 +20,7 @@ def _html(template, **data):
     class Comp(Component):
         citry = c
 
-        def template_data(self, kwargs, slots=None, context=None):
+        def template_data(self, kwargs, slots=None):
             return dict(data)
 
     Comp.template = template
@@ -41,7 +41,7 @@ class TestExprNodeEval:
             citry = c
             template = "<p>{{ x }}</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"x": "v"}
 
         el = Comp()
@@ -81,7 +81,7 @@ class TestExprNodeEmbedding:
             citry = c
             template = "<span>{{ label }}</span>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"label": "IN"}
 
         return Card

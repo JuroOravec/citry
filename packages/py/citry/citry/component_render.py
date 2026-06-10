@@ -21,9 +21,8 @@ it is the same for a given template. Calling it yields a fresh node list each
 render. (Per-element/per-signature body caching belongs to the parked
 const-folding design; see docs/design/constness.md.)
 
-This is a skeleton. Many features from django-components are not yet
-ported (extensions/hooks, context snapshotting, deferred rendering,
-JS/CSS media, provide/inject). They will be added iteratively.
+This is a skeleton. Some features from django-components are not yet
+ported (context snapshotting, JS/CSS media). They will be added iteratively.
 """
 
 from __future__ import annotations
@@ -57,6 +56,7 @@ if TYPE_CHECKING:
     from citry.citry_render import RenderPart
     from citry.component import Component
     from citry.nodes import BodyItem
+    from citry_core.template_parser import TagRules
 
 
 _ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -75,6 +75,7 @@ def gen_render_id() -> str:
 def render_impl(
     element: CitryElement,
     parent: Component | None = None,
+    provides: dict[str, Any] | None = None,
 ) -> CitryRender:
     """
     Render a component and everything inside it, returning a finished CitryRender.
@@ -96,6 +97,11 @@ def render_impl(
             template body).
         parent: The parent Component instance when rendering inside another
             component's template. Sets the parent/root links.
+        provides: The provide/inject entries the rendered component inherits
+            (see docs/design/provide.md). Empty for a plain user call; set
+            when an element is rendered from inside another render (an
+            embedded ``{{ element }}`` or slot content), so the subtree keeps
+            the provides active at its render site.
 
     Returns:
         A finished ``CitryRender`` with every child rendered (no
@@ -103,7 +109,7 @@ def render_impl(
         on it to get the HTML.
 
     """
-    root_render = _render_one(element, parent)
+    root_render = _render_one(element, parent, provides)
 
     # We keep a stack of two kinds of work:
     #   - _RenderTask: render one deferred child, and put its result where the
@@ -123,7 +129,7 @@ def render_impl(
         task = stack.pop()
         # Case: Render nested component
         if isinstance(task, _RenderTask):
-            child_render = _render_one(task.deferred.element, task.deferred.parent)
+            child_render = _render_one(task.deferred.element, task.deferred.parent, task.deferred.provides)
             _replace_in_parts(task.position.parts, task.position.idx, task.deferred, child_render)
             stack.append(_FinalizeTask(child_render, task.position))
             stack.extend(reversed(_scan_deferred(child_render)))
@@ -239,6 +245,7 @@ def _finalize(render: CitryRender) -> CitryRender:
 def _render_one(
     element: CitryElement,
     parent: Component | None = None,
+    provides: dict[str, Any] | None = None,
 ) -> CitryRender:
     """
     Render one component, without rendering the components inside it.
@@ -253,6 +260,9 @@ def _render_one(
             kwargs, slots, and the cached body (node list).
         parent: The parent Component instance if rendering inside another
             component's template. Used to set parent/root references.
+        provides: The provide/inject entries this component inherits (captured
+            where its tag sits, or passed by the caller). Readable via
+            ``Component.inject`` and passed on to its own descendants.
 
     Returns:
         A ``CitryRender`` whose parts may contain unresolved ``DeferredComponent``
@@ -268,11 +278,12 @@ def _render_one(
     #    (that returns a CitryElement) and calls Component.__init__.
     #    __init__ handles input normalization (dict/NamedTuple/dataclass ->
     #    dict, copied), id generation, typed kwargs/slots, raw_ variants,
-    #    and parent/root references.
+    #    inherited provides, and parent/root references.
     component = comp_cls._create_instance(
         kwargs=element.kwargs,
         slots=element.slots,
         parent=parent,
+        provides=provides,
     )
 
     # 2. Attach the per-component extension configs (eg `component.view`,
@@ -305,11 +316,18 @@ def _render_one(
     # 5. Build the render-scoped context. ``variables`` are the template
     #    variables (the template_data output); ``extra`` is the tree-wide
     #    scratch space extensions will populate (deps, etc.) - empty for now.
+    #    ``provides`` are the entries this component inherited plus anything
+    #    it registered itself via ``Component.provide`` during template_data;
+    #    a new mapping is built only when the component actually provided
+    #    something (see docs/design/provide.md section 4.1).
     #    The Const markers stay in ``variables`` so they flow down to descendant
     #    components, each of which can detect const-ness and cache accordingly.
     #    Const is a transparent proxy, so nodes treat a const value exactly like
     #    the underlying value.
-    context = CitryContext(variables=tpl_data, component=component)
+    active_provides = component._provides_inherited
+    if component._provides_own:
+        active_provides = {**active_provides, **component._provides_own}
+    context = CitryContext(variables=tpl_data, component=component, provides=active_provides)
 
     # 6. Build the body (node list). The body-generating function is
     #    parsed+compiled+exec'd once per component class (cached on the class).
@@ -341,10 +359,11 @@ def _render_one(
     #    renders them and runs on_component_rendered for each one once everything
     #    inside it has been rendered. This render is the component's whole
     #    output, so it is marked as the component's root render (serialization
-    #    relies on the flag to find component frame boundaries).
+    #    relies on the flag to find component frame boundaries). A transparent
+    #    component opts out: its output joins the surrounding frame and gets no
+    #    data-cid marker (e.g. the <c-provide> built-in).
     parts = _render_body(body, context)
-    return CitryRender(parts=parts, context=context, is_component_root=True)
-
+    return CitryRender(parts=parts, context=context, is_component_root=not comp_cls.transparent)
 
 def _get_template_string(comp_cls: type[Component]) -> str | None:
     """
@@ -389,11 +408,16 @@ def _get_body_generator(comp_cls: type[Component]) -> Callable[[], list[BodyItem
         if template_str is not None:
             template_str = comp_cls.citry.extensions.on_template_loaded(comp_cls, template_str)
 
-        comp_cls._template_body_generator = _compile_body_generator(template_str) if template_str is not None else None
+        comp_cls._template_body_generator = (
+            _compile_body_generator(template_str, comp_cls.citry._tag_rules()) if template_str is not None else None
+        )
     return comp_cls.__dict__["_template_body_generator"]
 
 
-def _compile_body_generator(template_str: str) -> Callable[[], list[BodyItem]]:
+def _compile_body_generator(
+    template_str: str,
+    user_rules: dict[str, TagRules] | None = None,
+) -> Callable[[], list[BodyItem]]:
     """
     Parse, compile, and exec a template string into a body-generating function.
 
@@ -401,11 +425,16 @@ def _compile_body_generator(template_str: str) -> Callable[[], list[BodyItem]]:
     ``generate_template`` function from the exec'd namespace; calling it
     returns a fresh list of static strings and runtime node objects.
 
+    ``user_rules`` are the parse-time validation rules derived from the
+    registered components' declarations (``Citry._tag_rules()``), so a
+    template using a declared component fails here, at parse time, on unknown
+    or missing kwargs/fills.
+
     The compiled code creates node objects (ExprNode, ComponentNode, etc.) by
     name. Those names are supplied through the ``ns`` namespace below, so the
     generated code can find them.
     """
-    ast = parse_template(template_str)
+    ast = parse_template(template_str, user_rules=user_rules)
     code = compile_template(ast)
 
     # Build the namespace for exec. "source" is the original template string,

@@ -389,9 +389,9 @@ django-mode infinite-loop guard; the `{% extends %}`/`block_context`
 compatibility; `SlotIsFilled` / `component_vars.is_filled` (deprecated
 upstream, superseded by `Component.slots`); the `SlotContent`/`SlotRef`
 aliases; and the `body=` fill kwarg (superseded by section 3.5). The
-provide/inject pass-through is deferred to the `<c-provide>` design, where it
-will ride on `CitryContext` and survive slot boundaries automatically via
-the closure.
+provide/inject pass-through is specified in [`provide.md`](provide.md):
+provided data rides on `CitryContext`, and the `<c-slot>` site hands its
+active provides into every `Slot` invocation.
 
 ---
 
@@ -672,7 +672,8 @@ The repo rule is dedupe-preserving-first-seen-order; fix while in
   allowed; `c-bind` and dynamic fill names keep their parser-native escape
   hatches, so no template that could be valid at runtime is rejected. Tests
   in `tests/test_tag_rules.py`.
-- **Provide/inject across slots**, with the `<c-provide>` design.
+- **Provide/inject across slots**, designed in [`provide.md`](provide.md)
+  (the slot-site provides ride into each `Slot` invocation).
 - **Slot metadata consumers** (CSS scoping via `Slot.extra` +
   `on_slot_rendered`), with the dependency extension.
 - **Const-folding around slots.** Slots are never part of the const

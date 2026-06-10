@@ -479,9 +479,11 @@ and auto-conversion of inner data classes.
   In citry, components are instantiated as `Component({...})`, not
   `Component.render(args=[], kwargs={})`, so positional args are gone.
   Only `Kwargs` remains.
-- **`get_template_data(kwargs, slots, context)` signature.** Simplified
-  from DJC's `get_template_data(self, args, kwargs, slots, context)`.
-  No `args` parameter.
+- **`template_data(kwargs, slots)` signature.** Simplified from DJC's
+  `get_template_data(self, args, kwargs, slots, context)`. No `args`
+  parameter (components take kwargs only), and no `context` parameter
+  (render state stays internal; components that need data from above use
+  `self.inject()`, see [provide.md](provide.md)).
 - **Rendering is a skeleton.** The Component class defines structure and
   registration; rendering (parse, compile, exec, run the node classes) lives in
   the render pipeline (see its entry below) and currently runs with stub nodes.
@@ -514,7 +516,7 @@ class Card(Component):
         title: str
         body: str = ""
 
-    def template_data(self, kwargs, slots=None, context=None):
+    def template_data(self, kwargs, slots=None):
         return {
             "title": kwargs.title,
             "body": kwargs.body,
@@ -554,12 +556,13 @@ creates a description of what to render, not the rendered output.
   `type.__call__(cls, ...)`, which bypasses the metaclass `__call__`.
   This mirrors DJC's `_render_impl` creating Component instances with
   render-time state (render_id, resolved context, etc.).
-- **`template_data(self, kwargs, slots, context)` stays explicit.**
+- **`template_data(self, kwargs, slots)` stays explicit.**
   Even though `self.kwargs` could exist, passing kwargs and slots as
   method arguments keeps the signature clear and mirrors React/Vue's
   functional component pattern. Users see immediately what inputs are
-  available without learning the full Component instance API. The
-  `context` parameter will likely become internal.
+  available without learning the full Component instance API. The render
+  context is internal; components that need data from above use
+  `self.inject()` ([provide.md](provide.md)).
 - **`.render()` delegates to the render pipeline.** It calls
   `render_impl(self)` (see the render pipeline entry below) and returns a
   `CitryRender`. The pipeline is a skeleton; the value, attribute, component, and
@@ -701,8 +704,8 @@ instance, call `template_data()`, validate it, build the template body, and
 render it to a string. `CitryElement.render()` delegates to it.
 
 **Why:** This is the rendering half of the composition/rendering split. It is a
-skeleton; many DJC features (extensions/hooks, context snapshotting, deferred
-rendering, JS/CSS media, provide/inject) are not yet ported.
+skeleton; some DJC features (context snapshotting, JS/CSS media) are not yet
+ported.
 
 **Design decisions:**
 - **Class-level body generator (DJC #1326).** Parsing + compiling + `exec` of a
@@ -788,7 +791,7 @@ from citry import Component, Const
 class Card(Component):
     template = "<p>{{ cols }}</p>"
 
-    def template_data(self, kwargs, slots=None, context=None):
+    def template_data(self, kwargs, slots=None):
         return {"cols": kwargs["cols"]}   # passes the marker through
 
 # Same const signature -> same cache entry; a different value -> a new entry.
@@ -929,7 +932,7 @@ class Card(Component):
     citry = c
     template = "<span>{{ title }}</span>"
 
-    def template_data(self, kwargs, slots=None, context=None):
+    def template_data(self, kwargs, slots=None):
         return {"title": kwargs["title"]}
 
 class Page(Component):
@@ -1124,7 +1127,7 @@ class Card(Component):
     citry = app
     template = "<p>Hello {{ who }}</p>"
 
-    def template_data(self, kwargs, slots=None, context=None):
+    def template_data(self, kwargs, slots=None):
         return {"who": "world"}
 
 str(Card())   # prints "Card rendered"; returns "<p>Hello world</p>"
@@ -1313,7 +1316,7 @@ collection + lazy Slots is the split that supports both.
 class Card(Component):
     template = "<div>{{ h }}</div>"
 
-    def template_data(self, kwargs, slots=None, context=None):
+    def template_data(self, kwargs, slots=None):
         return {"h": slots.get("header", "")}
 
 # Python channel:

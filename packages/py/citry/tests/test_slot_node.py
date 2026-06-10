@@ -60,7 +60,7 @@ class TestFillOrFallback:
             citry = c
             template = "<div><c-slot>Hi {{ who }}</c-slot></div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"who": "child"}
 
         class Page(Component):
@@ -78,14 +78,14 @@ class TestFillOrFallback:
             citry = c
             template = '<div><c-slot name="h">FB</c-slot></div>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"who": "child"}
 
         class Page(Component):
             citry = c
             template = '<c-card><c-fill name="h">Hi {{ who }}</c-fill></c-card>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"who": "parent"}
 
         assert str(Page()) == '<div data-cid-c2="" data-cid-c1="">Hi parent</div>'
@@ -172,7 +172,7 @@ class TestRequiredSlot:
             citry = c
             template = '<div><c-if cond="flag"><c-slot name="actions" required /></c-if>no slot</div>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"flag": False}
 
         # Resolution is render-time by design: a slot in an untaken branch
@@ -186,7 +186,7 @@ class TestRequiredSlot:
             citry = c
             template = '<div><c-slot name="actions" c-required="strict" /></div>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"strict": self.raw_kwargs.get("strict", False)}
 
         assert str(Card()) == '<div data-cid-c1=""></div>'
@@ -202,7 +202,7 @@ class TestScopedSlotData:
             citry = c
             template = '<ul><c-for each="u in users"><li><c-slot name="item" c-user="u" /></li></c-for></ul>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"users": ["Ann", "Bob"]}
 
         class Page(Component):
@@ -233,7 +233,7 @@ class TestScopedSlotData:
             citry = c
             template = '<div><c-slot c-bind="props" /></div>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"props": {"name": "item", "n": 42}}
 
         class Page(Component):
@@ -262,7 +262,7 @@ class TestScopedSlotData:
             citry = c
             template = '<div><c-slot c-name="which" /></div>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"which": "header"}
 
         class Page(Component):
@@ -472,7 +472,7 @@ class TestSlotErrors:
             citry = c
             template = '<div><c-slot c-bind="props" /></div>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"props": ["not", "a", "mapping"]}
 
         with pytest.raises(RuntimeError, match="must resolve to a mapping"):

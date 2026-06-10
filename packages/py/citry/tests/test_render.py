@@ -89,7 +89,7 @@ class TestContext:
             citry = c
             template = "<p>hi</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"title": "Hello", "count": 3}
 
         rendered = Card(x=1).render()

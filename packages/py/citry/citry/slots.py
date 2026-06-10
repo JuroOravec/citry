@@ -82,6 +82,15 @@ class SlotContext(Generic[TSlotData]):
     fallback.
     """
 
+    provides: Mapping[str, Any] | None = None
+    """
+    The provide/inject entries active where the Slot was invoked (the
+    ``<c-slot>`` site or expression site). ``None`` when the Slot is called
+    directly, outside a render. Template-defined fills use this so their
+    bodies render with the invoking site's provides; a slot function may read
+    it to inspect provided data. See docs/design/provide.md section 4.3.
+    """
+
 
 class SlotFunc(Protocol[TSlotData]):
     """
@@ -157,23 +166,35 @@ class Slot(Generic[TSlotData]):
         self.content_func: SlotFunc[TSlotData] = content_func
         """The content function. Call the Slot itself instead of calling this directly."""
 
-    def __call__(self, data: TSlotData | None = None, fallback: Slot | None = None) -> RenderPart:
+    def __call__(
+        self,
+        data: TSlotData | None = None,
+        fallback: Slot | None = None,
+        *,
+        provides: dict[str, Any] | None = None,
+    ) -> RenderPart:
         """
         Render the slot content and return it as a render part.
 
         The result is a ``str`` (escaped text) or a ``CitryRender`` (a rendered
         subtree, with its collected data intact). Pass ``data`` to expose slot
         data to the content function; pass ``fallback`` to give it access to
-        the slot's fallback content.
+        the slot's fallback content. ``provides`` carries the provide/inject
+        entries active at the invoking site (set by the ``<c-slot>`` and
+        expression machinery); content rendered here inherits them.
         """
         # Imported here, not at module load: citry_render imports Slot (for the
         # `{{ my_slot }}` detection in _render_value), so a top-level import
         # back into it would be circular.
         from citry.citry_render import _render_value  # noqa: PLC0415
 
-        ctx: SlotContext[Any] = SlotContext(data=data if data is not None else {}, fallback=fallback)
+        ctx: SlotContext[Any] = SlotContext(
+            data=data if data is not None else {},
+            fallback=fallback,
+            provides=provides,
+        )
         result = self.content_func(ctx)
-        return _render_value(result)
+        return _render_value(result, provides=provides)
 
     def __str__(self) -> str:
         """

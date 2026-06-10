@@ -45,7 +45,7 @@ class TestPythonSlotsChannel:
             citry = c
             template = "<div>{{ header }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"header": slots["header"]}
 
         assert str(Page(slots={"header": "Hi"})) == '<div data-cid-c1="">Hi</div>'
@@ -58,7 +58,7 @@ class TestPythonSlotsChannel:
             citry = c
             template = "<p>x</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 seen.update(slots)
                 return {}
 
@@ -78,7 +78,7 @@ class TestPythonSlotsChannel:
             class Slots:
                 header: SlotInput
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"h": slots.header}
 
         assert str(Page(slots={"header": "Hi"})) == '<div data-cid-c1="">Hi</div>'
@@ -90,7 +90,7 @@ class TestImplicitDefaultSlot:
             citry = c
             template = "<div>{{ body }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"body": slots.get("default", "EMPTY")}
 
         return Card
@@ -113,7 +113,7 @@ class TestImplicitDefaultSlot:
             citry = c
             template = "<c-card>Hello {{ name }}!</c-card>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"name": "Jo"}
 
         # `name` comes from Page's scope; Card has no `name` variable.
@@ -146,7 +146,7 @@ class TestNamedFills:
             citry = c
             template = "<div>{{ h }}|{{ f }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"h": slots.get("header", ""), "f": slots.get("footer", "")}
 
         return Card
@@ -179,7 +179,7 @@ class TestNamedFills:
             citry = c
             template = '<c-card><c-fill name="header">{{ greeting }}</c-fill></c-card>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"greeting": "Yo"}
 
         assert str(Page()) == '<div data-cid-c2="" data-cid-c1="">Yo|</div>'
@@ -192,7 +192,7 @@ class TestNamedFills:
             citry = c
             template = "<p>x</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 seen.update(slots)
                 return {}
 
@@ -214,7 +214,7 @@ class TestFillsUnderControlFlow:
             citry = c
             template = "<div>{{ h }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"h": slots.get("header", "NONE")}
 
         return Card
@@ -227,7 +227,7 @@ class TestFillsUnderControlFlow:
             citry = c
             template = '<c-card><c-if cond="flag"><c-fill name="header">ON</c-fill></c-if></c-card>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"flag": True}
 
         assert str(Page()) == '<div data-cid-c2="" data-cid-c1="">ON</div>'
@@ -240,7 +240,7 @@ class TestFillsUnderControlFlow:
             citry = c
             template = '<c-card><c-if cond="flag"><c-fill name="header">ON</c-fill></c-if></c-card>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"flag": False}
 
         assert str(Page()) == '<div data-cid-c2="" data-cid-c1="">NONE</div>'
@@ -256,7 +256,7 @@ class TestFillsUnderControlFlow:
                 '<c-else><c-fill name="header">B</c-fill></c-else></c-card>'
             )
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"flag": False}
 
         assert str(Page()) == '<div data-cid-c2="" data-cid-c1="">B</div>'
@@ -268,14 +268,14 @@ class TestFillsUnderControlFlow:
             citry = c
             template = "<div>{{ a }}|{{ b }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"a": slots.get("a", ""), "b": slots.get("b", "")}
 
         class Page(Component):
             citry = c
             template = '<c-card><c-for each="s in names"><c-fill c-name="s">F-{{ s }}</c-fill></c-for></c-card>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"names": ["a", "b"]}
 
         # Each fill closes over its own iteration, so the bodies differ.
@@ -288,14 +288,14 @@ class TestFillsUnderControlFlow:
             citry = c
             template = "<li>{{ h }}</li>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"h": slots["header"]}
 
         class Page(Component):
             citry = c
             template = '<c-for each="x in items"><c-card><c-fill name="header">{{ x }}</c-fill></c-card></c-for>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"items": [1, 2]}
 
         # The fill body is rendered later (the child renders through the
@@ -313,7 +313,7 @@ class TestFillsUnderControlFlow:
             citry = c
             template = '<c-card><c-for each="s in names"><c-fill c-name="s">X</c-fill></c-for></c-card>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"names": ["dup", "dup"]}
 
         with pytest.raises(RuntimeError, match="Multiple fills target the same slot name 'dup'"):
@@ -328,14 +328,14 @@ class TestFillProps:
             citry = c
             template = "<div>{{ h }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"h": slots.get("header", "")}
 
         class Page(Component):
             citry = c
             template = '<c-card><c-fill c-bind="props">X</c-fill></c-card>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"props": {"name": "header"}}
 
         assert str(Page()) == '<div data-cid-c2="" data-cid-c1="">X</div>'
@@ -351,7 +351,7 @@ class TestFillProps:
             citry = c
             template = '<c-card><c-fill c-bind="props">X</c-fill></c-card>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"props": {"name": "h", "bogus": 1}}
 
         with pytest.raises(RuntimeError, match="unsupported key 'bogus'"):
@@ -408,7 +408,7 @@ class TestScopedSlotData:
             citry = c
             template = "<div>{{ item(payload) }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"item": slots["item"], "payload": {"user": "Jo"}}
 
         class Page(Component):
@@ -424,14 +424,14 @@ class TestScopedSlotData:
             citry = c
             template = "<div>{{ item(payload) }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"item": slots["item"], "payload": {"n": 2}}
 
         class Page(Component):
             citry = c
             template = '<c-card><c-fill name="item" data="d">{{ prefix }}{{ d["n"] }}</c-fill></c-card>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"prefix": "no."}
 
         # `prefix` is Page's variable; `d` is the slot data from Card.
@@ -444,7 +444,7 @@ class TestScopedSlotData:
             citry = c
             template = "<div>{{ item(payload, fb) }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"item": slots["item"], "payload": {}, "fb": Slot("FALLBACK")}
 
         class Page(Component):
@@ -460,7 +460,7 @@ class TestScopedSlotData:
             citry = c
             template = '<ul><c-for each="u in users"><li>{{ item({"user": u}) }}</li></c-for></ul>'
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"item": slots["item"], "users": ["A", "B"]}
 
         class Page(Component):
@@ -482,7 +482,7 @@ class TestComponentsInsideSlotContent:
             citry = c
             template = "<div>{{ h }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"h": slots["header"]}
 
         class Page(Component):
@@ -504,7 +504,7 @@ class TestComponentsInsideSlotContent:
             citry = c
             template = "<div>{{ body }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"body": slots["default"]}
 
         class Page(Component):
@@ -524,14 +524,14 @@ class TestComponentsInsideSlotContent:
             citry = c
             template = "<b>{{ body }}</b>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"body": slots["default"]}
 
         class Card(Component):
             citry = c
             template = "<div>{{ h }}</div>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"h": slots["header"]}
 
         class Page(Component):

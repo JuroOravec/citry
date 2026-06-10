@@ -72,7 +72,10 @@ def serialize_render(root: CitryRender) -> str:
         children: list[tuple[CitryRender, str]] = []
         frame = _build_frame(render, component, children)
 
-        own_marker = [f"data-cid-{component.id}"] if component is not None else []
+        # A render only gets its component's marker when it is that component's
+        # root render; a transparent component's output (is_component_root
+        # False, e.g. <c-provide>) stays unmarked even when serialized directly.
+        own_marker = [f"data-cid-{component.id}"] if component is not None and render.is_component_root else []
         root_markers = own_marker + inherited
         if root_markers and frame:
             frame, added_to_child = transform_html(frame, root_markers, [], None, _RENDER_ID_ATTR)

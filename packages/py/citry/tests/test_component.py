@@ -193,7 +193,7 @@ class TestTemplateData:
         class MyComp(Component):
             citry = c
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"greeting": f"Hello {kwargs['name']}!"}
 
         inst = MyComp._create_instance()
@@ -340,7 +340,7 @@ class TestTemplateDataNormalization:
             citry = c
             template = "<p>hi</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"title": "Hello"}
 
         assert MyComp(title="x").render().serialize() == '<p data-cid-c1="">hi</p>'
@@ -358,7 +358,7 @@ class TestTemplateDataNormalization:
             citry = c
             template = "<p>hi</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return Data(title="Hello")
 
         assert MyComp(title="x").render().serialize() == '<p data-cid-c1="">hi</p>'
@@ -376,7 +376,7 @@ class TestTemplateDataNormalization:
             citry = c
             template = "<p>hi</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return Data(title="Hello")
 
         assert MyComp(title="x").render().serialize() == '<p data-cid-c1="">hi</p>'
@@ -395,7 +395,7 @@ class TestTemplateDataValidation:
             class TemplateData:
                 title: str
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"title": "Hello"}
 
         assert MyComp(title="x").render().serialize() == '<p data-cid-c1="">hi</p>'
@@ -410,7 +410,7 @@ class TestTemplateDataValidation:
             class TemplateData:
                 title: str
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {}
 
         with pytest.raises(TypeError):
@@ -426,7 +426,7 @@ class TestTemplateDataValidation:
             class TemplateData:
                 title: str
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"title": "Hello", "bogus": 1}
 
         with pytest.raises(TypeError):
@@ -442,7 +442,7 @@ class TestTemplateDataValidation:
             class TemplateData:
                 title: str
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return MyComp.TemplateData(title="Hello")
 
         assert MyComp(title="x").render().serialize() == '<p data-cid-c1="">hi</p>'
@@ -454,7 +454,7 @@ class TestTemplateDataValidation:
             citry = c
             template = "<p>hi</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"anything": "goes", "count": 3}
 
         assert MyComp(title="x").render().serialize() == '<p data-cid-c1="">hi</p>'

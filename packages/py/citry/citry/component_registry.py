@@ -29,10 +29,17 @@ Example::
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from citry.component import Component
+
+BUILTIN_COMPONENT_NAMES: Final = frozenset({"provide", "js", "css"})
+"""Component names reserved for the built-in tags (``js`` and ``css`` ahead
+of their implementations, so user code never comes to depend on them). The
+built-in classes themselves live in ``citry/components/``."""
 
 
 class AlreadyRegistered(Exception):
@@ -83,13 +90,24 @@ class ComponentRegistry:
     A single component class may be registered under multiple names
     (e.g. ``mycard`` and ``my-card``). The registry maintains a reverse
     map so unregister-by-class is O(1).
+
+    The registry also owns the built-in components' lifecycle: the names in
+    ``BUILTIN_COMPONENT_NAMES`` are reserved (user registrations under them
+    are rejected), and when a ``builtins_factory`` is given, the built-ins
+    are created through it on the first lookup (see ``_ensure_builtins``).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, builtins_factory: Callable[[], None] | None = None) -> None:
         # name -> component class (all names normalized/lowercased)
         self._name_to_cls: dict[str, type[Component]] = {}
         # class id -> set of registered names (reverse map)
         self._cls_to_names: dict[int, set[str]] = {}
+        # Creates and registers the built-in components (<c-provide>, ...).
+        # Provided by the owning Citry instance; None for a standalone
+        # registry (reserved names are still enforced).
+        self._builtins_factory = builtins_factory
+        self._builtins_registered = False
+        self._registering_builtins = False
 
     def register(self, comp_cls: type[Component], name: str | None = None) -> None:
         """
@@ -105,12 +123,16 @@ class ComponentRegistry:
 
         Re-registering the same class under the same name is a no-op.
 
+        The names in ``BUILTIN_COMPONENT_NAMES`` are reserved for the
+        built-in components and cannot be claimed by user registrations.
+
         Args:
             comp_cls: The Component subclass to register.
             name: Explicit name. If not given, derived from class name.
 
         Raises:
-            AlreadyRegistered: If the name is taken by a different class.
+            AlreadyRegistered: If the name is taken by a different class, or
+                is reserved for a built-in component.
             ValueError: If the name is not a valid component name.
 
         """
@@ -123,6 +145,17 @@ class ComponentRegistry:
             lowered = _normalize_name(raw_name)
             kebab = _pascal_to_kebab(raw_name)
             names = list(dict.fromkeys([lowered, kebab]))
+
+        # Built-ins are created lazily, so without this check a user class
+        # registered before the first lookup would silently take a
+        # built-in's place. The flag lets the built-ins themselves through.
+        if not self._registering_builtins:
+            for n in names:
+                if n in BUILTIN_COMPONENT_NAMES:
+                    raise AlreadyRegistered(
+                        f"Cannot register {comp_cls.__name__!r} as {n!r}: "
+                        f"the name is reserved for the built-in <c-{n}> component."
+                    )
 
         cls_id = id(comp_cls)
         for n in names:
@@ -179,6 +212,7 @@ class ComponentRegistry:
             NotRegistered: If no component is registered under that name.
 
         """
+        self._ensure_builtins()
         normalized = _normalize_name(name)
         if normalized not in self._name_to_cls:
             raise NotRegistered(f"No component registered as {normalized!r}.")
@@ -186,16 +220,45 @@ class ComponentRegistry:
 
     def has(self, name: str) -> bool:
         """Check if a component is registered under the given name."""
+        self._ensure_builtins()
         return _normalize_name(name) in self._name_to_cls
 
     def all(self) -> dict[str, type[Component]]:
         """All registered components as a name -> class dict."""
+        self._ensure_builtins()
         return dict(self._name_to_cls)
 
     def clear(self) -> None:
-        """Remove all registrations."""
+        """Remove all registrations. Built-ins are recreated on next lookup."""
         self._name_to_cls.clear()
         self._cls_to_names.clear()
+        self._builtins_registered = False
+
+    def _ensure_builtins(self) -> None:
+        """
+        Create and register the built-in components, once.
+
+        Built-ins (the ``<c-provide>`` component, with ``<c-js>``/``<c-css>``
+        to follow) are ordinary Component subclasses bound to one Citry
+        instance, so each instance needs its own; the owning Citry instance
+        passes a factory that creates them. They are created on the first
+        lookup rather than up front: the default Citry instance is
+        constructed while ``citry/citry.py`` is still importing, when the
+        component module cannot be imported yet. By the time anything looks
+        a component up, imports are complete.
+        """
+        if self._builtins_registered or self._builtins_factory is None:
+            return
+        self._builtins_registered = True
+
+        # Creating the built-in classes runs the normal registration path
+        # (the metaclass registers each class); the flag lets them through
+        # the reserved-name check.
+        self._registering_builtins = True
+        try:
+            self._builtins_factory()
+        finally:
+            self._registering_builtins = False
 
     def __len__(self) -> int:
         """Number of unique component classes registered."""

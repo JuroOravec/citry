@@ -290,7 +290,7 @@ class TestTemplateHooks:
             citry = app
             template = "<p>{{ x }}</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 return {"x": "hi"}
 
         str(Card())
@@ -379,7 +379,7 @@ class TestComponentConfig:
             citry = app
             template = "<p>hi</p>"
 
-            def template_data(self, kwargs, slots=None, context=None):
+            def template_data(self, kwargs, slots=None):
                 captured["title"] = self.view.title()
                 return {}
 

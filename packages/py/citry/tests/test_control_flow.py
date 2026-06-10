@@ -19,7 +19,7 @@ def _html(template, **data):
     class Comp(Component):
         citry = c
 
-        def template_data(self, kwargs, slots=None, context=None):
+        def template_data(self, kwargs, slots=None):
             return dict(data)
 
     Comp.template = template
