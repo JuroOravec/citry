@@ -3,7 +3,9 @@ pub mod safe_eval;
 pub mod template_parser;
 
 use pyo3::prelude::*;
+use pyo3::types::PyFrozenSet;
 
+use citry_template_parser::constants::HTML_VOID_ELEMENTS;
 use citry_template_parser::{
     Comment, Expr, HtmlAttr, HtmlAttrKind, HtmlEndTag, HtmlStartTag, Node, StaticNamedSlot,
     TagRules, Template, TemplateElement, Text, Token,
@@ -54,6 +56,13 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     template_parser_mod.add_class::<Template>()?;
     // Config
     template_parser_mod.add_class::<TagRules>()?;
+    // Constants
+    // HTML void elements (elements that cannot have children, e.g. <br/>),
+    // single-sourced from the Rust parser so Python never drifts from it.
+    template_parser_mod.add(
+        "HTML_VOID_ELEMENTS",
+        PyFrozenSet::new(m.py(), HTML_VOID_ELEMENTS)?,
+    )?;
 
     Ok(())
 }

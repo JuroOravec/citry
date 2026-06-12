@@ -29,6 +29,7 @@ pub const C_RAW_TAG: &str = "c-raw";
 pub const C_FILL_TAG: &str = "c-fill";
 pub const C_SLOT_TAG: &str = "c-slot";
 pub const C_COMPONENT_TAG: &str = "c-component";
+pub const C_ELEMENT_TAG: &str = "c-element";
 
 // Node class name constants
 // These are the class/struct names that need to be defined in each language implementation.
@@ -63,7 +64,8 @@ pub const RESERVED_TAG_NAMES: &[&str] = &[
     C_SLOT_TAG,
     // Note: following special tags allow `<c-fill>` inside them
     // because they are practically just custom components:
-    // c-component, c-provide, c-js, c-css
+    // c-component, c-element, c-provide, c-js, c-css
+    // (c-element allows only the default fill, per TAG_SLOT_RULES_DATA)
 ];
 
 /// Tag names that are forbidden in regular HTML tags
@@ -182,6 +184,8 @@ pub const TAG_ATTR_RULES_DATA: &[(&str, (Option<&[&[&str]]>, &[&[&str]]))] = &[
     (C_SLOT_TAG, (None, &[])),
     // c-component: any attributes allowed, but one of ["is", "c-is", "c-bind"] required
     (C_COMPONENT_TAG, (None, &[&["is", "c-is", "c-bind"]])),
+    // c-element: any attributes allowed, but one of ["is", "c-is", "c-bind"] required
+    (C_ELEMENT_TAG, (None, &[&["is", "c-is", "c-bind"]])),
     // NOTE: `<c-provide>`, `<c-js>`, and `<c-css>` are not included here
     // because they can be implemented as user-side components.
 ];
@@ -193,6 +197,9 @@ pub const TAG_ATTR_RULES_DATA: &[(&str, (Option<&[&[&str]]>, &[&[&str]]))] = &[
 pub const TAG_SLOT_RULES_DATA: &[(&str, (Option<&[&str]>, &[&str]))] = &[
     // c-component: any slots allowed, none required
     (C_COMPONENT_TAG, (None, &[])),
+    // c-element: a plain HTML element has children but no named slots,
+    // so only the "default" slot is allowed, none required
+    (C_ELEMENT_TAG, (Some(&["default"]), &[])),
     // These cannot contain <c-fill> tags, not applicable for slot validation
     // c-if, c-elif, c-else, c-for, c-empty, c-raw, c-fill
 

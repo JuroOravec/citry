@@ -348,3 +348,8 @@ class template_parser:
         required_attrs: list[list[str]]
         allowed_slots: list[str] | None
         required_slots: list[str]
+
+    # Constants
+
+    HTML_VOID_ELEMENTS: frozenset[str]
+    """HTML void elements (elements that cannot have children, e.g. ``<br/>``)."""

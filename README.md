@@ -54,9 +54,9 @@ That's it. If you know HTML, you already know 90% of Citry.
 
 ## 12 special tags
 
-Beyond custom components, Citry provides **12 built-in tags** for common patterns.
+Beyond custom components, Citry provides **13 built-in tags** for common patterns.
 
-With just these 12 tags, Citry is as versatile as Vue or React:
+With just these 13 tags, Citry is as versatile as Vue or React:
 
 | Tag               | Purpose                                | Example                                              |
 | ----------------- | -------------------------------------- | ---------------------------------------------------- |
@@ -70,6 +70,7 @@ With just these 12 tags, Citry is as versatile as Vue or React:
 | `<c-slot>`        | Define insertion point                 | `<c-slot name="header" />`                           |
 | `<c-fill>`        | Fill a slot                            | `<c-fill name="header">...</c-fill>`                 |
 | `<c-component>`   | Dynamic component                      | `<c-component c-is="comp_name" />`                   |
+| `<c-element>`     | Dynamic HTML element                   | `<c-element c-is="tag_name">...</c-element>`         |
 | **Misc:**         |                                        |                                                      |
 | `<c-provide>`     | Dependency injection (ContextProvider) | `<c-provide key="theme" mode="dark">...</c-provide>` |
 | `<c-css>`         | Render components' CSS here            | `<c-css />`                                          |
@@ -156,6 +157,29 @@ Just like `{{ }}`, the expression inside is written in your host language:
 </div>
 ```
 
+A `True` value renders the attribute bare (`disabled` above); `False` and `None` omit the attribute entirely.
+
+## Class and style attributes
+
+`class` and `style` accept structured values (like Vue), so you can compute them without string concatenation:
+
+```html
+<!-- Input (is_active = True, color = "red") -->
+<div c-class="['btn', { 'active': is_active, 'hidden': False }]"></div>
+<div c-style="{ 'color': color, 'background-color': 'blue' }"></div>
+
+<!-- Result: -->
+<div class="btn active"></div>
+<div style="color: red; background-color: blue;"></div>
+```
+
+- `class` may be a plain string, a dict of `{ class_name: enabled }` (a falsy value drops the class), or a list mixing strings, dicts, and nested lists.
+- `style` may be an inline CSS string, a dict of `{ css_property: value }` (write property names as CSS spells them, e.g. `background-color`), or a list of those. In a merge, a `None` value lets an earlier value stand, while `False` removes the property entirely.
+
+When one element gets `class` or `style` from several places (a static attribute, `c-class`/`c-style`, or a `c-bind` spread), the values **merge** instead of overwriting each other - see [Attribute spreading](#attribute-spreading).
+
+The same rules are available in Python as `merge_attrs` and `format_attrs` (`from citry import merge_attrs, format_attrs`) for building attribute dicts in your component code.
+
 ## Nested templates
 
 Dynamic `c-*` attributes can contain nested templates instead of expressions.
@@ -203,14 +227,28 @@ You can use `c-bind` multiple times and interlace it with regular or dynamic att
 ```html
 <!-- Input -->
 <div
+  id="default"
+  c-bind="{ 'id': 'first', 'title': 'Hi' }"
+  c-id="'override'"
+></div>
+
+<!-- Result (last value for each attribute wins): -->
+<div id="override" title="Hi"></div>
+```
+
+The two exceptions are `class` and `style`: their values from all sources **merge** instead, so a spread can add classes without wiping out the element's own (see [Class and style attributes](#class-and-style-attributes)):
+
+```html
+<!-- Input -->
+<div
   class="default"
   c-bind="{ 'class': 'from-bind', 'id': 'first' }"
   c-class="'override'"
   c-bind="{ 'id': 'second' }"
 ></div>
 
-<!-- Result (last value for each attribute wins): -->
-<div class="override" id="second"></div>
+<!-- Result (classes merge, id keeps the last value): -->
+<div class="default from-bind override" id="second"></div>
 ```
 
 ## Component slots

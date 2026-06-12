@@ -51,6 +51,11 @@ Template: TypeAlias = _rust.template_parser.Template
 # Config types
 TagRules: TypeAlias = _rust.template_parser.TagRules
 
+# Constants
+# HTML void elements (elements that cannot have children, e.g. <br/>),
+# single-sourced from the Rust parser.
+HTML_VOID_ELEMENTS: frozenset[str] = _rust.template_parser.HTML_VOID_ELEMENTS
+
 __all__ = [
     # Functions
     "parse_template",
@@ -70,4 +75,6 @@ __all__ = [
     "Template",
     # Config types
     "TagRules",
+    # Constants
+    "HTML_VOID_ELEMENTS",
 ]

@@ -11,7 +11,7 @@ class TestCitryInstance:
         c = Citry()
         # A fresh instance carries exactly the built-in components (created
         # lazily on the first lookup), nothing else.
-        assert set(c.components) == {"provide"}
+        assert set(c.components) == {"provide", "component", "element"}
 
     def test_repr(self):
         c = Citry()
@@ -26,7 +26,7 @@ class TestCitryInstance:
         assert "a" in c.components
         c.clear()
         # User components are gone; the built-ins are recreated on lookup.
-        assert set(c.components) == {"provide"}
+        assert set(c.components) == {"provide", "component", "element"}
 
     def test_settings_stored(self):
         # Citry now takes a typed settings schema (CitrySettings) rather than

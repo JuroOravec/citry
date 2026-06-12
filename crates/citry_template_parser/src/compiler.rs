@@ -71,10 +71,10 @@ use crate::ast::{
     HtmlAttr, HtmlAttrKind, HtmlEndTag, HtmlStartTag, Node, Template, TemplateElement, Token,
 };
 use crate::constants::{
-    COMPONENT_NODE, CONTROL_FLOW_GROUPS, CONTROL_FLOW_TAGS, C_COMPONENT_TAG, C_ELIF_TAG,
-    C_ELSE_TAG, C_EMPTY_TAG, C_FILL_TAG, C_FOR_TAG, C_IF_TAG, C_SLOT_TAG, ELEMENT_ATTRS_NODE,
-    EXPR_ATTR_NODE, EXPR_NODE, FILL_NODE, FOR_NODE, HTML_VOID_ELEMENTS, IF_NODE, SLOT_NODE,
-    STATIC_ATTR_NODE, TAG_ATTR_RULES, TEMPLATE_ATTR_NODE,
+    COMPONENT_NODE, CONTROL_FLOW_GROUPS, CONTROL_FLOW_TAGS, C_COMPONENT_TAG, C_ELEMENT_TAG,
+    C_ELIF_TAG, C_ELSE_TAG, C_EMPTY_TAG, C_FILL_TAG, C_FOR_TAG, C_IF_TAG, C_SLOT_TAG,
+    ELEMENT_ATTRS_NODE, EXPR_ATTR_NODE, EXPR_NODE, FILL_NODE, FOR_NODE, HTML_VOID_ELEMENTS,
+    IF_NODE, SLOT_NODE, STATIC_ATTR_NODE, TAG_ATTR_RULES, TEMPLATE_ATTR_NODE,
 };
 use crate::error::CompileError;
 use crate::lang::lang::{Lang, LangImpl, LangSpecArgument, LangSpecStruct};
@@ -263,6 +263,8 @@ pub fn compile_template_body(template: Template) -> Result<Vec<LangSpecArgument>
 
                     // Component nodes (render user-defined components)
                     C_COMPONENT_TAG => {
+                        reject_is_attr_conflict(&node)?;
+
                         // Check if this component is using static `is` attribute
                         // instead of the dynamic `c-is`. If the user is using the static variant,
                         // then we know the component name (the static value), and so we can skip
@@ -276,19 +278,7 @@ pub fn compile_template_body(template: Template) -> Result<Vec<LangSpecArgument>
                         // ```html
                         // <c-XyzComp ...>
                         // ```
-                        let mut component_name: Option<String> = None;
-
-                        for attr in node.attrs() {
-                            if attr.key.content == "is" {
-                                // Found `is` attribute - extract the value if it has any
-                                if let Some(inner_value) = &attr.inner_value {
-                                    component_name = Some(inner_value.content.clone());
-                                    break;
-                                }
-                            }
-                        }
-
-                        if let Some(comp_name) = component_name {
+                        if let Some(comp_name) = find_static_is_value(&node) {
                             // We have found a static `is` attribute with the component name.
                             // Now mutate node to `<c-{comp_name}>` and drop the `is` attribute
                             match &mut node {
@@ -305,6 +295,14 @@ pub fn compile_template_body(template: Template) -> Result<Vec<LangSpecArgument>
                         // Finally, create a ComponentNode, whether we've got `<c-component>` or `<c-MyComp>`
                         let comp_node = compile_component_node(node)?;
                         body_items.push(comp_node);
+                    }
+
+                    // Dynamic HTML elements (render a plain element whose tag
+                    // name is decided at render time), e.g.
+                    // `<c-element c-is="form_content_tag" class="x">...</c-element>`.
+                    C_ELEMENT_TAG => {
+                        let element_items = compile_element_node(node)?;
+                        body_items.extend(element_items);
                     }
                     // Unknown c-* tag => user-defined component
                     // This contains also c-provide, c-js, c-css
@@ -541,6 +539,63 @@ fn compile_html_node(node: Node) -> Result<Vec<LangSpecArgument>, CompileError> 
     }
 
     Ok(items)
+}
+
+/// Reject `is` together with `c-is` on `<c-component>` / `<c-element>`.
+///
+/// The two spellings are the same input (static vs expression). Both at once
+/// would collapse onto one kwarg at render time with the later one silently
+/// winning, so the conflict is rejected here, where both are still visible.
+fn reject_is_attr_conflict(node: &Node) -> Result<(), CompileError> {
+    let has_is = node.attrs().iter().any(|attr| attr.key.content == "is");
+    let has_c_is = node.attrs().iter().any(|attr| attr.key.content == "c-is");
+    if has_is && has_c_is {
+        return Err(CompileError::Syntax(format!(
+            "<{}> accepts either 'is' or 'c-is', not both",
+            node.tag_name()
+        )));
+    }
+    Ok(())
+}
+
+/// The value of a static `is="..."` attribute, when present and non-empty.
+///
+/// A bare `is`, `is=""`, or only a dynamic `c-is` returns `None`; those cases
+/// stay on the runtime path, where the built-in component raises the proper
+/// "requires an 'is' value" error.
+fn find_static_is_value(node: &Node) -> Option<String> {
+    for attr in node.attrs() {
+        if attr.key.content == "is" {
+            if let Some(inner_value) = &attr.inner_value {
+                if !inner_value.content.is_empty() {
+                    return Some(inner_value.content.clone());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Whether a tag-name string is syntactically valid: an ASCII letter followed
+/// by letters, digits, hyphens, underscores, or dots. Mirrors the component
+/// registry's rule on the Python side, so both halves of `<c-element>` (the
+/// compile-time rewrite here and the render-time path) accept the same names.
+fn is_valid_element_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// Whether a template body holds real content: any node or expression, or any
+/// text beyond whitespace. Whitespace-only bodies are formatting, not content.
+fn template_has_meaningful_content(template: &Template) -> bool {
+    template.elements.iter().any(|element| match element {
+        TemplateElement::Text(text) => !text.token.content.trim().is_empty(),
+        _ => true,
+    })
 }
 
 /// Map variable tokens to their names, deduped, preserving first-seen (source) order.
@@ -845,6 +900,82 @@ fn compile_component_node(node: Node) -> Result<LangSpecArgument, CompileError> 
             LangSpecArgument::Bool(has_fills),
         ],
     }))
+}
+
+/// Compile a `<c-element>` node (a plain HTML element whose tag name is
+/// decided at render time). See docs/design/dynamic_component.md.
+///
+/// With a static `is` and no fills in the body, the tag name is known here,
+/// so the node compiles exactly as if the element had been written out:
+/// zero render-time cost. Otherwise (dynamic `c-is`, `is` via `c-bind`, or a
+/// fill-bearing body, where an explicit `<c-fill name="default">` is legal),
+/// the node compiles to `ComponentNode("element")` and the "element"
+/// built-in component resolves it at render time.
+fn compile_element_node(mut node: Node) -> Result<Vec<LangSpecArgument>, CompileError> {
+    reject_is_attr_conflict(&node)?;
+
+    let static_name = if node.contains_fills() {
+        None
+    } else {
+        find_static_is_value(&node)
+    };
+
+    // Dynamic path: resolved at render time by the built-in.
+    let Some(element_name) = static_name else {
+        return Ok(vec![compile_component_node(node)?]);
+    };
+
+    // Static path: rewrite the node into the plain element.
+    // The name lands verbatim in the output, so it must be a syntactically
+    // valid tag name (same charset rule the component registry applies).
+    if !is_valid_element_name(&element_name) {
+        return Err(CompileError::Syntax(format!(
+            "<c-element>: {:?} is not a valid HTML tag name",
+            element_name
+        )));
+    }
+
+    // Mutate node into the plain element and drop `is`
+    match &mut node {
+        Node::WithBody { start_tag, .. } | Node::SelfClosing { start_tag, .. } => {
+            start_tag.name.content = element_name.clone();
+            start_tag.attrs.retain(|attr| attr.key.content != "is");
+        }
+    }
+
+    // A void element cannot have children. An empty body is formatting, not
+    // content; rebuild the node as self-closing so the output stays compact
+    // (`<br/>`), matching a statically written tag. The check is exact-match
+    // like compile_html_node's, so `is="BR"` behaves like a literal `<BR>`.
+    if HTML_VOID_ELEMENTS.contains(&element_name.as_str()) {
+        node = match node {
+            Node::WithBody {
+                start_tag,
+                body,
+                used_variables,
+                introduced_variables,
+                comments,
+                ..
+            } => {
+                if template_has_meaningful_content(&body) {
+                    return Err(CompileError::Syntax(format!(
+                        "<c-element>: void element '{}' cannot have children",
+                        element_name
+                    )));
+                }
+                Node::SelfClosing {
+                    start_tag,
+                    used_variables,
+                    introduced_variables,
+                    comments,
+                    contains_fills: false,
+                }
+            }
+            other => other,
+        };
+    }
+
+    compile_html_node(node)
 }
 
 /// Compile a group of control flow nodes (e.g., `<c-if>/<c-elif>/<c-else>` or `<c-for>/<c-empty>`)
