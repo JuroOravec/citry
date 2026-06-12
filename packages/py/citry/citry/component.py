@@ -67,6 +67,8 @@ from citry.slots import Slot, normalize_slot_fills
 from citry.util.misc import to_dict
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from citry.citry_render import OnRenderGenerator, RenderReplacement
     from citry.component_render import _CompiledTemplate
 
@@ -545,6 +547,25 @@ class Component(metaclass=ComponentMeta):
 
         """
         return inject_value(self._provides_inherited, key, default, type(self).__name__)
+
+    @property
+    def ancestors(self) -> Iterator[Component]:
+        """
+        All ancestor components, nearest first: the parent, then the parent's
+        parent, up to and including the root. Empty for a root component.
+
+        Useful to check where a component is being rendered, e.g.::
+
+            is_themed = any(isinstance(c, Theme) for c in self.ancestors)
+
+        For fill content, the chain follows who *wrote* the component, the
+        same as ``parent``: a component written inside a ``<c-fill>`` has the
+        fill's author as its parent, not the component whose slot rendered it.
+        """
+        current = self.parent
+        while current is not None:
+            yield current
+            current = current.parent
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)

@@ -346,7 +346,7 @@ Status legend:
 | `is_filled` / `ComponentVars` (`{{ component_vars.* }}`) | ♻️ Superseded | djc injected template globals; in citry slots are explicit `template_data` inputs, so "is filled" is `slots.get(...)` |
 | `request`, `context_processors_data`, `as_view()`, `render_to_response()`, `response_class` | ⏭️ Skip (Django) | The view extension stays in django-components |
 | `parent` / `root` | ✅ Done | Set across the component boundary during render |
-| `ancestors` generator | 🚧 To migrate | Trivial walk over `parent` |
+| `ancestors` generator | ✅ Done | Property walking the `parent` links, nearest first up to and including the root (djc's docstring says the root is excluded, but its code includes it; citry matches the code). The chain follows who wrote the component, same as `parent` |
 | `inject()` | ✅ Done | `MISSING` sentinel so `inject(key, None)` genuinely defaults to `None`; did-you-mean hint |
 | `provide()` | ✅ Done | citry addition: djc only had the `{% provide %}` tag |
 | `Component.render()` classmethod (args/kwargs/slots/deps_strategy/request/...) | ♻️ Superseded | `Component(...)` -> `CitryElement` -> `.render()` -> `.serialize()`; `deps_strategy` pending (above) |
@@ -538,7 +538,7 @@ pipeline (`CitryRender` parts + `CitryContext.extra`).
 
 ### `context.py` (50 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -627,7 +627,7 @@ stays in django-components; the verdicts below are about each *field*.
 
 ### `apps.py` (121 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -656,7 +656,7 @@ stays in django-components; the verdicts below are about each *field*.
 
 ### `finders.py` (166 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -667,7 +667,7 @@ stays in django-components; the verdicts below are about each *field*.
 
 ### `library.py` (69 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -678,7 +678,7 @@ stays in django-components; the verdicts below are about each *field*.
 
 ### `template_loader.py` (32 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -705,7 +705,7 @@ stays in django-components; the verdicts below are about each *field*.
 
 ### `tag_formatter.py` (305 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -738,7 +738,7 @@ stays in django-components; the verdicts below are about each *field*.
 
 ### `templatetags/component_tags.py`
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -777,7 +777,7 @@ These exist in `_djc_reference/` but were not in the classification tables.
 
 #### `template.py` (486 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -793,7 +793,7 @@ These exist in `_djc_reference/` but were not in the classification tables.
 
 #### `components/` (DynamicComponent, ErrorFallback)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -816,7 +816,7 @@ These exist in `_djc_reference/` but were not in the classification tables.
 
 #### `perfutil/`
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -896,7 +896,7 @@ Ported function by function, on demand. Current state:
 
 ### `util/nanoid.py` (28 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -907,7 +907,7 @@ Ported function by function, on demand. Current state:
 
 ### `util/weakref.py` (23 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -951,7 +951,7 @@ Ported function by function, on demand. Current state:
 
 ### `util/context.py` (169 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -963,7 +963,7 @@ Ported function by function, on demand. Current state:
 
 ### `util/template_tag.py` (467 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -976,7 +976,7 @@ Ported function by function, on demand. Current state:
 
 ### `util/template_parser.py` (224 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -987,7 +987,7 @@ Ported function by function, on demand. Current state:
 
 ### `util/django_monkeypatch.py` (372 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |

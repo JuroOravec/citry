@@ -507,3 +507,115 @@ class TestGeneratorCaching:
         assert Base.__dict__["_template_body_generator"] is not Child.__dict__["_template_body_generator"]
         assert Base(x=1).render().serialize() == '<p data-cid-c3="">base</p>'
         assert Child(x=1).render().serialize() == '<p data-cid-c4="">child</p>'
+
+
+class TestAncestors:
+    def test_root_component_has_no_ancestors(self):
+        c = Citry()
+        seen = []
+
+        class Root(Component):
+            citry = c
+            template = "<p>x</p>"
+
+            def template_data(self, kwargs, slots=None):
+                seen.append(list(self.ancestors))
+
+        Root().render()
+        assert seen == [[]]
+
+    def test_yields_chain_nearest_first_including_root(self):
+        c = Citry()
+        seen = []
+
+        class Leaf(Component):
+            citry = c
+            template = "<i>x</i>"
+
+            def template_data(self, kwargs, slots=None):
+                seen.append([type(a).__name__ for a in self.ancestors])
+
+        class Middle(Component):
+            citry = c
+            template = "<section><c-leaf /></section>"
+
+        class Root(Component):
+            citry = c
+            template = "<main><c-middle /></main>"
+
+        Root().render()
+        assert seen == [["Middle", "Root"]]
+
+    def test_isinstance_check_use_case(self):
+        # The use case ancestors exists for: "is this component rendered
+        # inside a Theme?" The chain follows who wrote the component (the
+        # `parent` contract), so this holds when Theme's own template renders
+        # the widget; content passed into Theme's slots keeps its writer's
+        # chain instead (see the fill test below).
+        c = Citry()
+        seen = []
+
+        class Widget(Component):
+            citry = c
+            template = "<i>w</i>"
+
+            def template_data(self, kwargs, slots=None):
+                seen.append(any(type(a).__name__ == "Theme" for a in self.ancestors))
+
+        class Theme(Component):
+            citry = c
+            template = "<div><c-widget /></div>"
+
+        class Page(Component):
+            citry = c
+            template = "<main><c-theme /><c-widget /></main>"
+
+        Page().render()
+        assert seen == [True, False]
+
+    def test_embedded_element_starts_a_fresh_chain(self):
+        # An element rendered via {{ em }} has no parent link, so its chain
+        # is empty (same contract as `parent`).
+        c = Citry()
+        seen = []
+
+        class Embedded(Component):
+            citry = c
+            template = "<i>x</i>"
+
+            def template_data(self, kwargs, slots=None):
+                seen.append(list(self.ancestors))
+
+        class Root(Component):
+            citry = c
+            template = "<main>{{ em }}</main>"
+
+            def template_data(self, kwargs, slots=None):
+                return {"em": Embedded()}
+
+        Root().render()
+        assert seen == [[]]
+
+    def test_fill_content_follows_the_writer_chain(self):
+        # A component written inside a fill has the fill's author as parent;
+        # the slot owner is not in its chain (same contract as `parent`).
+        c = Citry()
+        seen = []
+
+        class Inner(Component):
+            citry = c
+            template = "<i>x</i>"
+
+            def template_data(self, kwargs, slots=None):
+                seen.append([type(a).__name__ for a in self.ancestors])
+
+        class Card(Component):
+            citry = c
+            template = '<div><c-slot name="body" /></div>'
+
+        class Page(Component):
+            citry = c
+            template = '<c-card><c-fill name="body"><c-inner /></c-fill></c-card>'
+
+        Page().render()
+        assert seen == [["Page"]]
