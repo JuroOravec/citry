@@ -55,6 +55,8 @@ from citry.slots import Slot
 from citry.util.html import escape
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     from citry.citry_context import CitryContext
     from citry.component import Component
 
@@ -65,6 +67,24 @@ if TYPE_CHECKING:
 #     before any serialize()).
 # A CitryRender's `parts`, and what a node's render() returns, are made of these.
 RenderPart: TypeAlias = "str | CitryRender | DeferredComponent"
+
+# What ``Component.on_render`` may return to replace the component's whole
+# output (docs/design/on_render.md section 3): final text (a ``str``, used
+# as-is, not autoescaped), a composed element (rendered in the component's
+# place), an already-rendered subtree, or a ``Slot`` (invoked with no data).
+# ``None`` is not part of the alias: returning ``None`` means "no
+# replacement, render the template as usual".
+RenderReplacement: TypeAlias = "str | CitryElement | CitryRender | Slot"
+
+# The shape of ``Component.on_render`` when it contains a ``yield`` (the
+# generator form, docs/design/on_render.md section 3.2). The generator yields
+# a replacement (or ``None`` for "render my template as usual"), receives
+# back ``(result, error)`` once that content has fully settled (children
+# included), and may end with ``return <replacement>`` to set the final
+# output. Exactly one of ``result`` / ``error`` is set.
+OnRenderGenerator: TypeAlias = (
+    "Generator[RenderReplacement | None, tuple[CitryRender | None, Exception | None], RenderReplacement | None]"
+)
 
 
 class CitryRender:

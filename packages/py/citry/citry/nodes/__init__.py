@@ -73,6 +73,7 @@ from citry.citry_element import CitryElement
 from citry.citry_render import CitryRender, DeferredComponent, _render_value
 from citry.constness import Const, const_value
 from citry.slots import Slot
+from citry.util.exception import add_slot_to_error_message
 from citry.util.html import escape
 from citry_core.safe_eval import safe_eval
 
@@ -1044,7 +1045,10 @@ class SlotNode(Node):
             # The provides active at this slot site travel into the fill, so
             # components inside the fill body can inject what this component
             # provides around the slot (docs/design/provide.md section 4.3).
-            part = fill(data, fallback=body_slot, provides=context.provides)
+            # An error raised by the slot content gets this slot as a path
+            # frame ("Card(slot:body)") in its message.
+            with add_slot_to_error_message(type(component).__name__, name):
+                part = fill(data, fallback=body_slot, provides=context.provides)
         else:
             if required:
                 msg = (
@@ -1056,7 +1060,8 @@ class SlotNode(Node):
                     msg += f" Did you mean {close[0]!r}?"
                 raise RuntimeError(msg)
             slot_used = body_slot
-            part = body_slot(data, provides=context.provides)
+            with add_slot_to_error_message(type(component).__name__, name):
+                part = body_slot(data, provides=context.provides)
 
         return component.citry.extensions.on_slot_rendered(
             component=component,

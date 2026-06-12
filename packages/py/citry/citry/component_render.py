@@ -33,9 +33,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from citry.citry_context import CitryContext
+from citry.citry_element import CitryElement
 from citry.citry_render import CitryRender, DeferredComponent
 from citry.constants import COMP_ID_PREFIX, UID_LENGTH
-from citry.constness import extract_const_vars, fold_body
+from citry.constness import const_value, extract_const_vars, fold_body
 from citry.media import get_template
 from citry.nodes import (
     ComponentNode,
@@ -50,15 +51,16 @@ from citry.nodes import (
     TemplateHtmlAttr,
     TemplateNode,
 )
-from citry.util.misc import to_dict
+from citry.slots import Slot
+from citry.util.exception import set_component_error_message, set_template_position_error_message
+from citry.util.misc import is_generator, to_dict
 from citry.util.nanoid import generate
 from citry_core.template_parser import compile_template, parse_template
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from citry.citry_element import CitryElement
-    from citry.citry_render import RenderPart
+    from citry.citry_render import OnRenderGenerator, RenderPart, RenderReplacement
     from citry.component import Component
     from citry.nodes import BodyItem
     from citry_core.template_parser import TagRules
@@ -92,10 +94,18 @@ def render_impl(
     page never hits Python's recursion limit (see
     docs/design/deferred_rendering.md).
 
-    A component's ``on_component_rendered`` hook runs once everything inside that
-    component has been rendered (so children run before their parents), and at
-    that same point the child's collected dependencies are copied into its
-    parent.
+    A component's after-render hooks run once everything inside that component
+    has been rendered (so children run before their parents): first its own
+    ``on_render`` generator is resumed with the settled result (it may replace
+    the output, any number of times), then extensions' ``on_component_rendered``
+    runs, and the child's collected dependencies are copied into its parent.
+
+    When a component's render fails, the error travels up the component tree:
+    each enclosing component's ``on_render`` generator, then extensions'
+    ``on_component_rendered``, runs with the error and may swallow it by
+    producing replacement output. An error nothing handles is raised from
+    here, carrying the component path in its message
+    (docs/design/on_render.md sections 5-6).
 
     Args:
         element: The component to render (its class, kwargs, slots, and cached
@@ -114,38 +124,152 @@ def render_impl(
         on it to get the HTML.
 
     """
-    root_render = _render_one(element, parent, provides)
+    root_render, root_generator = _render_one_traced(element, parent, provides)
 
     # We keep a stack of two kinds of work:
     #   - _RenderTask: render one deferred child, and put its result where the
     #     DeferredComponent was.
-    #   - _FinalizeTask: run that child's after-render hook and copy its
+    #   - _FinalizeTask: run that child's after-render hooks and copy its
     #     dependencies into the parent.
     # When we render a child we add its _FinalizeTask first, then its own
     # children on top. We always take from the top of the stack, so a child and
     # everything inside it finish before we run the parent's _FinalizeTask. (This
     # is the approach django-components uses, but on objects instead of HTML
     # strings.)
-    stack: list[_RenderTask | _FinalizeTask] = [_FinalizeTask(root_render, None)]
+    stack: list[_RenderTask | _FinalizeTask] = [_FinalizeTask(root_render, None, root_generator)]
     stack.extend(reversed(_scan_deferred(root_render)))
 
     root_result = root_render
+
+    def commit(old: CitryRender, final: CitryRender, position: _DeferredComponentPosition | None) -> None:
+        # Put a component's settled output where it belongs: at its recorded
+        # position in the parent's parts (copying its collected dependencies
+        # up), or as the new root result.
+        nonlocal root_result
+        if position is None:
+            root_result = final
+        else:
+            _replace_in_parts(position.parts, position.idx, old, final)
+            _merge_dependencies(position.parent_context, final.context)
+
+    def requeue(task: _FinalizeTask, content: RenderReplacement, generator: OnRenderGenerator | None) -> None:
+        # The component's on_render generator replaced its output. Render the
+        # new content in its place (children deferred as usual) and finalize
+        # the component again once the new content settles; the generator (if
+        # still live) is then resumed with that result.
+        old = task.render
+        component = old.context.component
+        if component is None:
+            msg = "an on_render generator settled on a render that has no component."
+            raise RuntimeError(msg)
+        new_render = CitryRender(
+            parts=_replacement_parts(content, old.context, component),
+            context=old.context,
+            is_component_root=old.is_component_root,
+        )
+        if task.position is not None:
+            _replace_in_parts(task.position.parts, task.position.idx, old, new_render)
+        stack.append(_FinalizeTask(new_render, task.position, generator))
+        stack.extend(reversed(_scan_deferred(new_render)))
+
+    def settle(task: _FinalizeTask, error: Exception | None) -> CitryRender | None:
+        # Settle a component whose subtree has finished rendering (or, when
+        # ``error`` is set, whose subtree failed): drive its on_render
+        # generator, then run the extension hook via _finalize.
+        #
+        # Returns the final render to commit, or None when the generator
+        # produced new content that was queued for re-processing (this task's
+        # replacement finalize is then on the stack). Raises when the error,
+        # incoming or raised here, was not handled, so the caller bubbles it.
+        render: CitryRender | None = task.render if error is None else None
+        generator = task.generator
+        while generator is not None:
+            try:
+                yielded = generator.send((render, error))
+            except StopIteration as stop:
+                if stop.value is not None:
+                    # `return <content>`: the final output; the generator is
+                    # done, so the re-queued finalize carries no generator.
+                    requeue(task, stop.value, None)
+                    return None
+                # Plain `return`: keep the current result (and error).
+                break
+            except Exception as gen_error:  # noqa: BLE001
+                # The generator raised: that becomes the component's error.
+                # A fresh error gets this component's path; re-raising the
+                # error it was sent keeps the original frames.
+                if gen_error is not error:
+                    set_component_error_message(gen_error, _component_path(task.render.context.component))
+                render, error = None, gen_error
+                break
+            if yielded is None:
+                # Bare yield after the first: answer immediately with the
+                # unchanged result.
+                continue
+            try:
+                requeue(task, yielded, generator)
+            except TypeError as bad_yield:
+                # The yielded value was not renderable; deliver the failure
+                # back to this generator, like any error in its content.
+                set_component_error_message(bad_yield, _component_path(task.render.context.component))
+                render, error = None, bad_yield
+                continue
+            return None
+        return _finalize(task.render, error)
+
+    def bubble(error: Exception) -> None:
+        # A component's render failed; give its ancestors a chance to handle
+        # the error (docs/design/on_render.md section 5).
+        #
+        # The stack is pushed depth-first, so everything above an ancestor's
+        # _FinalizeTask is exactly that ancestor's pending subtree work.
+        # Popping to the nearest _FinalizeTask therefore discards the dead
+        # output's remaining work and lands on the nearest enclosing
+        # component. That component's on_render generator, then extensions,
+        # may swallow the error by producing replacement output, which ends
+        # the unwind. Otherwise the error continues to the next ancestor, and
+        # out of render_impl at the root.
+        while stack:
+            task = stack.pop()
+            if not isinstance(task, _FinalizeTask):
+                continue
+            try:
+                final = settle(task, error)
+            except Exception as unhandled:  # noqa: BLE001
+                error = unhandled
+                continue
+            if final is not None:
+                commit(task.render, final, task.position)
+            # final is None: the generator queued replacement output, which
+            # also ends the unwind (the component is re-processing).
+            return
+        raise error
+
     while stack:
         task = stack.pop()
         # Case: Render nested component
         if isinstance(task, _RenderTask):
-            child_render = _render_one(task.deferred.element, task.deferred.parent, task.deferred.provides)
+            try:
+                child_render, generator = _render_one_traced(
+                    task.deferred.element,
+                    task.deferred.parent,
+                    task.deferred.provides,
+                )
+            except Exception as error:  # noqa: BLE001
+                bubble(error)
+                continue
             _replace_in_parts(task.position.parts, task.position.idx, task.deferred, child_render)
-            stack.append(_FinalizeTask(child_render, task.position))
+            stack.append(_FinalizeTask(child_render, task.position, generator))
             stack.extend(reversed(_scan_deferred(child_render)))
         # Case: Finalize nested component
         else:
-            final = _finalize(task.render)
-            if task.position is None:
-                root_result = final
-            else:
-                _replace_in_parts(task.position.parts, task.position.idx, task.render, final)
-                _merge_dependencies(task.position.parent_context, final.context)
+            try:
+                final = settle(task, None)
+            except Exception as error:  # noqa: BLE001
+                bubble(error)
+                continue
+            if final is not None:
+                commit(task.render, final, task.position)
 
     return root_result
 
@@ -166,10 +290,13 @@ class _RenderTask(NamedTuple):
 
 
 class _FinalizeTask(NamedTuple):
-    """Run a rendered component's after-render hook and copy its dependencies up."""
+    """Run a rendered component's after-render hooks and copy its dependencies up."""
 
     render: CitryRender
     position: _DeferredComponentPosition | None  # None for the top (root) component
+    # The component's live on_render generator when the hook yielded; resumed
+    # with the settled result when this task runs (None for most components).
+    generator: OnRenderGenerator | None = None
 
 
 def _scan_deferred(render: CitryRender) -> list[_RenderTask]:
@@ -223,20 +350,75 @@ def _replace_in_parts(parts: list[RenderPart], index: int, target: object, new: 
     raise RuntimeError(msg)
 
 
-def _finalize(render: CitryRender) -> CitryRender:
+def _component_path(component: Component | None) -> list[str]:
     """
-    Run a rendered component's ``on_component_rendered`` hook and apply the result.
+    The class names from the root component down to ``component``, inclusive.
 
-    An extension may return a new ``CitryRender`` or ``str`` to replace the
-    output, or raise to turn it into an error that propagates. This runs once the
-    component and everything inside it have been rendered.
+    Walks the ``parent`` links upward and reverses, so the root comes first.
+    These names are the path frames put into error messages ("MyPage > Card >
+    Avatar"; see docs/design/on_render.md section 6). An embedded element
+    rendered from an expression has no parent link; its chain starts at
+    itself, and the path of the component it is embedded in is prepended when
+    the error passes through that component's render (``_render_one_traced``).
+    """
+    names: list[str] = []
+    while component is not None:
+        names.append(type(component).__name__)
+        component = component.parent
+    names.reverse()
+    return names
+
+
+def _render_one_traced(
+    element: CitryElement,
+    parent: Component | None = None,
+    provides: dict[str, Any] | None = None,
+) -> tuple[CitryRender, OnRenderGenerator | None]:
+    """
+    ``_render_one``, with the component path added to any error raised.
+
+    The path is the parent chain plus this component's class name, which is
+    the same chain the created instance would report (its ``parent`` is set
+    from this ``parent`` argument), and is available even when the failure
+    happens before the instance exists (e.g. kwargs validation).
+    """
+    try:
+        return _render_one(element, parent, provides)
+    except Exception as err:
+        set_component_error_message(err, [*_component_path(parent), element.comp_cls.__name__])
+        raise
+
+
+def _finalize(render: CitryRender, error: Exception | None) -> CitryRender:
+    """
+    Settle a rendered component: run ``on_component_rendered`` and apply the result.
+
+    Runs once the component and everything inside it have been rendered, or,
+    when ``error`` is set, when a component inside it failed and the error is
+    bubbling up (docs/design/on_render.md section 5). The extension hook
+    receives the rendered output, or ``None`` together with the error when
+    rendering failed. An extension may replace the output with a new
+    ``CitryRender`` or ``str`` (which also swallows the error), or raise to
+    replace the error. An error that is not swallowed is raised here, to
+    continue bubbling.
     """
     component = render.context.component
     if component is None:
+        if error is not None:
+            raise error
         return render
-    new_render, error = component.citry.extensions.on_component_rendered(component, render, None)
-    if error is not None:
-        raise error
+    new_render, out_error = component.citry.extensions.on_component_rendered(
+        component,
+        None if error is not None else render,
+        error,
+    )
+    if out_error is not None:
+        # A fresh error (raised by an extension just now) gets this
+        # component's path; a bubbling error passing through unchanged
+        # already carries the frames from where it happened.
+        if out_error is not error:
+            set_component_error_message(out_error, _component_path(component))
+        raise out_error
     if isinstance(new_render, str):
         return CitryRender(parts=[new_render], context=render.context, is_component_root=render.is_component_root)
     if new_render is not None:
@@ -251,14 +433,15 @@ def _render_one(
     element: CitryElement,
     parent: Component | None = None,
     provides: dict[str, Any] | None = None,
-) -> CitryRender:
+) -> tuple[CitryRender, OnRenderGenerator | None]:
     """
     Render one component, without rendering the components inside it.
 
-    Creates the Component instance, runs the data methods, builds (or reuses) the
-    template body, and turns it into a ``CitryRender``. Any ``<c-child>`` tags in
-    the template become unrendered ``DeferredComponent`` parts; rendering those,
-    and running ``on_component_rendered``, is done by ``render_impl``.
+    Creates the Component instance, runs the data methods, calls the
+    ``on_render`` hook, builds (or reuses) the template body, and turns it
+    into a ``CitryRender``. Any ``<c-child>`` tags in the template become
+    unrendered ``DeferredComponent`` parts; rendering those, and running
+    ``on_component_rendered``, is done by ``render_impl``.
 
     Args:
         element: The CitryElement to render. Carries the component class,
@@ -271,7 +454,9 @@ def _render_one(
 
     Returns:
         A ``CitryRender`` whose parts may contain unresolved ``DeferredComponent``
-        parts, plus the ``CitryContext`` used during the render.
+        parts, plus the component's live ``on_render`` generator when the hook
+        yielded (``None`` otherwise). ``render_impl`` resumes the generator with
+        the settled result once the component's subtree has rendered.
 
     """
     comp_cls = element.comp_cls
@@ -334,6 +519,30 @@ def _render_one(
         active_provides = {**active_provides, **component._provides_own}
     context = CitryContext(variables=tpl_data, component=component, provides=active_provides)
 
+    # 5.5 The per-component render hook (docs/design/on_render.md section 3).
+    #     Returning None (the default) renders the template as usual.
+    #     Returning content makes it the component's whole output, and the
+    #     template body below is never built or walked. A generator runs up
+    #     to its first yield here (the "before" phase), and what it yielded
+    #     picks the output the same way; the live generator then travels with
+    #     the component's finalize task and is resumed with the settled
+    #     result once the whole subtree has rendered (``settle`` in
+    #     ``render_impl``).
+    hook_result = component.on_render()
+    generator: OnRenderGenerator | None = None
+    parts: list[RenderPart] | None = None
+    if is_generator(hook_result):
+        # Prime the generator (runs the before-phase, up to the first
+        # yield). A bare first yield means "render the template as usual";
+        # yielded or returned content becomes the output instead.
+        generator = hook_result
+        parts, generator = _send_into_generator(generator, None, context, component, default_on_none=True)
+    elif hook_result is not None:
+        parts = _replacement_parts(hook_result, context, component)
+
+    if parts is not None:
+        return CitryRender(parts=parts, context=context, is_component_root=not comp_cls.transparent), generator
+
     # 6. Build the body (the list of static strings and node objects the
     #    template compiles to). Parsing and compiling the template runs once
     #    per component class (cached on the class).
@@ -360,33 +569,142 @@ def _render_one(
     #    entries. A node injected by an extension may use a variable outside
     #    that set; such a variable simply stays un-optimized and re-evaluates
     #    each render, which is always safe.
-    compiled = _get_compiled_template(comp_cls)
-    if compiled is None:
-        body: list[BodyItem] = []
-    else:
-        const_vars, signature = extract_const_vars(tpl_data, used_vars=compiled.used_vars)
+    try:
+        compiled = _get_compiled_template(comp_cls)
+        if compiled is None:
+            body: list[BodyItem] = []
+        else:
+            const_vars, signature = extract_const_vars(tpl_data, used_vars=compiled.used_vars)
 
-        def build() -> list[BodyItem]:
-            return fold_body(
-                extensions.on_template_compiled(comp_cls, compiled.generate()),
-                const_vars,
-                # Folding an attribute region bakes its dict before extensions
-                # see it, so keep the regions live when anyone subscribes.
-                fold_attrs=not extensions.has_hook("on_attrs_resolved"),
-            )
+            def build() -> list[BodyItem]:
+                return fold_body(
+                    extensions.on_template_compiled(comp_cls, compiled.generate()),
+                    const_vars,
+                    # Folding an attribute region bakes its dict before extensions
+                    # see it, so keep the regions live when anyone subscribes.
+                    fold_attrs=not extensions.has_hook("on_attrs_resolved"),
+                )
 
-        body = citry_instance._const_body_cache.get_or_build(comp_cls, signature, build)
+            body = citry_instance._const_body_cache.get_or_build(comp_cls, signature, build)
 
-    # 7. Walk the body into a parts list and wrap it in a CitryRender. Any nested
-    #    components are left as unrendered DeferredComponent parts; render_impl
-    #    renders them and runs on_component_rendered for each one once everything
-    #    inside it has been rendered. This render is the component's whole
-    #    output, so it is marked as the component's root render (serialization
-    #    relies on the flag to find component frame boundaries). A transparent
-    #    component opts out: its output joins the surrounding frame and gets no
-    #    data-cid marker (e.g. the <c-provide> built-in).
-    parts = _render_body(body, context)
-    return CitryRender(parts=parts, context=context, is_component_root=not comp_cls.transparent)
+        # 7. Walk the body into a parts list and wrap it in a CitryRender. Any nested
+        #    components are left as unrendered DeferredComponent parts; render_impl
+        #    renders them and runs on_component_rendered for each one once everything
+        #    inside it has been rendered. This render is the component's whole
+        #    output, so it is marked as the component's root render (serialization
+        #    relies on the flag to find component frame boundaries). A transparent
+        #    component opts out: its output joins the surrounding frame and gets no
+        #    data-cid marker (e.g. the <c-provide> built-in).
+        parts = _render_body(body, context)
+    except Exception as render_error:
+        if generator is None:
+            raise
+        # The component's own template failed; deliver the error to its live
+        # on_render generator, the same ``(None, error)`` it would receive
+        # for a failing child. This is what lets an error boundary guard its
+        # own slot content, which renders right here in its body walk. The
+        # generator may produce replacement output; if it does not (plain
+        # return), the error continues out as usual.
+        parts, generator = _send_into_generator(
+            generator,
+            (None, render_error),
+            context,
+            component,
+            default_on_none=False,
+        )
+        if parts is None:
+            raise
+
+    return CitryRender(parts=parts, context=context, is_component_root=not comp_cls.transparent), generator
+
+
+def _send_into_generator(
+    generator: OnRenderGenerator,
+    send_arg: Any,
+    context: CitryContext,
+    component: Component,
+    *,
+    default_on_none: bool,
+) -> tuple[list[RenderPart] | None, OnRenderGenerator | None]:
+    """
+    Send into an ``on_render`` generator until it produces an outcome.
+
+    Used inside ``_render_one``, at priming time (``send_arg`` is ``None``)
+    and when the component's own template render failed (``send_arg`` is
+    ``(None, error)``). Returns ``(parts, generator)``: the replacement parts
+    (``None`` for "no replacement") and the generator if it is still live
+    (``None`` once it finished).
+
+    An unrenderable yielded value (the ``TypeError`` from the coercion) is
+    delivered back into the generator as ``(None, error)``, so every yield
+    uniformly receives the settled result or failure of what it yielded.
+
+    A bare yield (``yield`` / ``yield None``) means "render the template as
+    usual" while priming (``default_on_none=True``). After an error was
+    delivered (``default_on_none=False``) it means "answer again with the
+    unchanged result", so the same value is re-sent, mirroring the settle
+    loop in ``render_impl``.
+    """
+    while True:
+        try:
+            yielded = generator.send(send_arg)
+        except StopIteration as stop:
+            if stop.value is None:
+                # Plain return: no replacement, generator done.
+                return None, None
+            return _replacement_parts(stop.value, context, component), None
+        if yielded is None:
+            if default_on_none:
+                return None, generator
+            continue
+        try:
+            return _replacement_parts(yielded, context, component), generator
+        except TypeError as bad_yield:
+            set_component_error_message(bad_yield, _component_path(component))
+            send_arg = (None, bad_yield)
+
+
+def _replacement_parts(value: RenderReplacement, context: CitryContext, component: Component) -> list[RenderPart]:
+    """
+    Convert an ``on_render`` replacement value into the component's parts list.
+
+    The accepted values mirror what a ``{{ ... }}`` expression accepts
+    (``_render_value`` in citry_render.py), with two differences: a ``str``
+    is the component's own output, so it is used as-is rather than
+    autoescaped, and an unsupported type is an error rather than being
+    escaped to text (docs/design/on_render.md section 3.1).
+    """
+    # A Const marker is unwrapped first (a replacement built from a literal
+    # template attribute arrives Const-wrapped); the value becomes output
+    # here, so the marker has no further role, and the proxy must not leak
+    # into the parts.
+    value = const_value(value)
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Slot):
+        # Invoked with no data, like {{ my_slot }}. Slot content renders with
+        # the scope of the component that wrote it, so its collected data is
+        # copied into this render (the same merge as _render_body does).
+        part = value(provides=context.provides)
+        if isinstance(part, CitryRender) and part.context is not context:
+            _merge_dependencies(context, part.context)
+        return [part]
+    if isinstance(value, CitryElement):
+        # Deferred like a <c-child> tag in the template: the render_impl loop
+        # renders it, so a replacement chain can never exhaust the Python
+        # call stack.
+        return [DeferredComponent(value, parent=component, provides=context.provides)]
+    if isinstance(value, CitryRender):
+        # An already-rendered subtree is inlined; its collected data is
+        # copied into this render.
+        if value.context is not context:
+            _merge_dependencies(context, value.context)
+        return [value]
+    msg = (
+        f"{type(component).__name__}.on_render() returned {type(value).__name__!r}; "
+        "expected a str, a composed element, a CitryRender, a Slot, or None."
+    )
+    raise TypeError(msg)
 
 
 class _CompiledTemplate(NamedTuple):
@@ -500,12 +818,41 @@ def _render_body(body: list[BodyItem], context: CitryContext) -> list[RenderPart
         if isinstance(item, str):
             parts.append(item)
             continue
-        part = item.render(context)
+        try:
+            part = item.render(context)
+        except Exception as err:
+            _attach_template_position(err, item, context)
+            raise
         if isinstance(part, CitryRender) and part.context is not context:
             _merge_dependencies(context, part.context)
         parts.append(part)
 
     return parts
+
+
+def _attach_template_position(err: Exception, node: BodyItem, context: CitryContext) -> None:
+    """
+    Add the failing node's template snippet to the error message.
+
+    Every compiler-emitted node carries ``source`` (the whole template
+    string) and ``position`` (its start/end indices in it); a node injected
+    by an extension may not, in which case this does nothing. The snippet is
+    added once per error, by the innermost failing node: control-flow bodies
+    render through ``_render_body`` recursively, so the enclosing node's
+    pass through here is a no-op (see ``set_template_position_error_message``).
+
+    The header names ``context.component`` as the template's owner. That
+    holds for slot-fill content too: a fill body renders with the context of
+    the component that wrote it, and its nodes come from that component's
+    template.
+    """
+    source = getattr(node, "source", None)
+    position = getattr(node, "position", None)
+    if not isinstance(source, str) or not isinstance(position, tuple) or len(position) != 2:
+        return
+    component = context.component
+    component_name = type(component).__name__ if component is not None else None
+    set_template_position_error_message(err, source, position, component_name)
 
 
 def _merge_dependencies(into: CitryContext, source: CitryContext) -> None:

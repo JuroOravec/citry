@@ -8,8 +8,18 @@ from dataclasses import MISSING, fields, is_dataclass
 from importlib import import_module
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from typing_extensions import TypeIs
+
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from types import ModuleType
+
+
+# TypeIs (not TypeGuard) so type checkers also narrow the negative branch:
+# "not a generator" rules the generator type out of a union.
+def is_generator(obj: Any) -> TypeIs[Generator[Any, Any, Any]]:
+    """Check if an object is a generator (anything with a ``send`` method)."""
+    return hasattr(obj, "send")
 
 
 def to_dict(data: Any) -> dict[str, Any]:

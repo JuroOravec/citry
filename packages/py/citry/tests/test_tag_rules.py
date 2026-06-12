@@ -92,7 +92,9 @@ class TestBuildTagRules:
 
     def test_cache_invalidated_on_register(self):
         c = Citry()
-        assert c._tag_rules() == {}
+        # A fresh instance carries only the built-ins' rules (the
+        # <c-error-fallback> built-in declares typed Kwargs/Slots).
+        assert set(c._tag_rules()) == {"c-error-fallback"}
 
         _declared_card(c)
         assert "c-card" in c._tag_rules()

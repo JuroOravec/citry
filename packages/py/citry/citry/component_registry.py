@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
     from citry.component import Component
 
-BUILTIN_COMPONENT_NAMES: Final = frozenset({"provide", "component", "element", "js", "css"})
+BUILTIN_COMPONENT_NAMES: Final = frozenset({"provide", "component", "element", "error-fallback", "js", "css"})
 """Component names reserved for the built-in tags (``js`` and ``css`` ahead
 of their implementations, so user code never comes to depend on them). The
 built-in classes themselves live in ``citry/components/``."""

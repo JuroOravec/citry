@@ -24,7 +24,7 @@ from citry.citry import (
 )
 from citry.citry_context import CitryContext
 from citry.citry_element import CitryElement
-from citry.citry_render import CitryRender
+from citry.citry_render import CitryRender, OnRenderGenerator, RenderReplacement
 from citry.component import Component
 from citry.component_registry import AlreadyRegistered, ComponentRegistry, NotRegistered
 from citry.constness import Const
@@ -103,9 +103,11 @@ __all__ = [
     "OnComponentRenderedContext",
     "OnComponentUnregisteredContext",
     "OnExtensionCreatedContext",
+    "OnRenderGenerator",
     "OnSlotRenderedContext",
     "OnTemplateCompiledContext",
     "OnTemplateLoadedContext",
+    "RenderReplacement",
     "Slot",
     "SlotContext",
     "SlotFunc",

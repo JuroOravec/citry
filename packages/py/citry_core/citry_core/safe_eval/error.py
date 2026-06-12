@@ -1,10 +1,11 @@
 import functools
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 T = TypeVar("T", bound=Callable)
 
 
-def _format_error_with_context(
+def format_error_with_context(
     error: Exception,
     source: str,
     start_index: int,
@@ -27,6 +28,7 @@ def _format_error_with_context(
               ^^^^^^
     NameError: name 'my_var' is not defined
     ```
+
     """
     # Convert source to lines with line numbers
     lines = source.split("\n")
@@ -72,8 +74,13 @@ def _format_error_with_context(
     error_lines = []
     if add_prefix:
         error_lines.append(f"Error in {func_name}: {type(error).__name__}: {error}")
+    elif len(error.args) and error.args[0] is not None:
+        # Just use the original error message. Read it from `args` when
+        # possible: `str(error)` re-quotes the message for exceptions like
+        # KeyError (whose __str__ is the repr of its argument), which garbles
+        # a message that was already rewritten to a multi-line string.
+        error_lines.append(str(error.args[0]))
     else:
-        # Just use the original error message
         error_lines.append(str(error))
     error_lines.append("")
 
@@ -115,9 +122,7 @@ def _format_error_with_context(
         if underline_start >= 0:
             # Create underline: prefix spaces + spaces to column + ^ characters
             prefix_len = len(line_prefix)  # "    4 | " = 9 characters
-            underline = " " * (prefix_len + underline_start) + "^" * max(
-                1, underline_end - underline_start
-            )
+            underline = " " * (prefix_len + underline_start) + "^" * max(1, underline_end - underline_start)
             error_lines.append(underline)
 
     # Update exception message
@@ -147,7 +152,7 @@ def error_context(func_name: str) -> Callable[[T], T]:
                 return func(*args, **kwargs)
             except Exception as e:
                 # On error, modify the error message to include the source code context
-                _format_error_with_context(e, source, start_index, end_index, func_name)
+                format_error_with_context(e, source, start_index, end_index, func_name)
                 raise
 
         return wrapper

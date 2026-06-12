@@ -1,8 +1,10 @@
+from .error import format_error_with_context
+from .eval import SecurityError, safe_eval
 from .sandbox import unsafe
-from .eval import safe_eval, SecurityError
 
 __all__ = [
-    "safe_eval",
     "SecurityError",
+    "format_error_with_context",
+    "safe_eval",
     "unsafe",
 ]

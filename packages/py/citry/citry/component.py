@@ -67,6 +67,7 @@ from citry.slots import Slot, normalize_slot_fills
 from citry.util.misc import to_dict
 
 if TYPE_CHECKING:
+    from citry.citry_render import OnRenderGenerator, RenderReplacement
     from citry.component_render import _CompiledTemplate
 
 
@@ -408,6 +409,78 @@ class Component(metaclass=ComponentMeta):
         Returns:
             A dict of template variables, or None for no variables.
 
+        """
+        return None
+
+    def on_render(self) -> RenderReplacement | OnRenderGenerator | None:
+        """
+        Hook to replace or post-process this component's rendered output.
+
+        Called on every render of this component, after ``template_data`` and
+        just before the template renders. Return ``None`` (the default) to
+        render the template as usual. Return content to use it as the
+        component's whole output instead; the template is then not rendered
+        at all. Accepted content (see docs/design/on_render.md section 3):
+
+        - a ``str``, used as-is (NOT autoescaped: it is this component's own
+          output, the same trust as its template)
+        - a composed element (``OtherComponent(title="hi")``), rendered in
+          this component's place
+        - an already-rendered ``CitryRender``, inlined
+        - a ``Slot``, invoked with no data
+
+        Because ``None`` means "no replacement", return ``""`` to output
+        literally nothing.
+
+        Everything the hook needs is on ``self``: ``kwargs``, ``slots``,
+        ``parent``, ``inject()``. To pass data to the template, use
+        ``template_data``; this hook is for replacing output.
+
+        For example, render a placeholder instead of the template when there
+        is no data::
+
+            class MyTable(Component):
+                template = "<table>...</table>"
+
+                def on_render(self):
+                    if not self.raw_kwargs.get("rows"):
+                        return "<p>No data</p>"
+                    return None
+
+        **Generator form.** Include a ``yield`` to also see the component's
+        finished output, children included, and react to it - for example to
+        catch a failing child (this is how error boundaries work)::
+
+            class Guarded(Component):
+                template = "..."
+
+                def on_render(self):
+                    # BEFORE: runs just before the template renders.
+                    result, error = yield
+
+                    # AFTER: result is the completed CitryRender, or None
+                    # if rendering failed (then error is the exception).
+                    if error is not None:
+                        return "<p>Something went wrong</p>"
+                    return None
+
+        The protocol (full detail in docs/design/on_render.md section 3.2):
+
+        - A bare ``yield`` (or ``yield None``) on the first yield means
+          "render my template as usual"; yielding content means "use this as
+          my output instead" (same accepted values as above).
+        - The yield receives ``(result, error)`` once that output has fully
+          settled: ``result`` is the live ``CitryRender`` (not a string; do
+          not serialize it here unless you are replacing the output with the
+          serialized form), or ``None`` when rendering failed, with ``error``
+          set. Exactly one of the two is set.
+        - You can yield any number of times; each ``yield <content>``
+          replaces the output, renders it, and receives the new
+          ``(result, error)``. A bare ``yield`` after the first answers
+          immediately with the current result unchanged.
+        - End with ``return <content>`` to set the final output, ``raise`` to
+          make that the component's error, or plain ``return`` to keep the
+          current result (an unhandled error keeps bubbling).
         """
         return None
 

@@ -2,7 +2,7 @@ import builtins
 from typing import Any, Callable, Mapping, Optional, Tuple
 
 from citry_core import _rust
-from citry_core.safe_eval.error import _format_error_with_context, error_context
+from citry_core.safe_eval.error import error_context, format_error_with_context
 from citry_core.safe_eval.sandbox import (
     is_safe_attribute,
     is_safe_callable,
@@ -192,7 +192,7 @@ def _exec_func_with_error_handling(
         # If the error hasn't been processed by `error_context` decorator,
         # include the whole expression in the error message (without the "Error in..." prefix)
         if not getattr(e, "_error_processed", False):
-            _format_error_with_context(e, source, 0, len(source), kind, add_prefix=False)
+            format_error_with_context(e, source, 0, len(source), kind, add_prefix=False)
             # Mark it as processed to avoid double-formatting if re-raised
             e._error_processed = True  # type: ignore[attr-defined]
         raise
@@ -210,7 +210,7 @@ def _exec_func_with_error_handling(
             # If the error hasn't been processed by `error_context` decorator,
             # include the whole source code in the error message (without the "Error in..." prefix)
             if not getattr(e, "_error_processed", False):
-                _format_error_with_context(e, source, 0, len(source), kind, add_prefix=False)
+                format_error_with_context(e, source, 0, len(source), kind, add_prefix=False)
                 # Mark it as processed to avoid double-formatting if re-raised
                 e._error_processed = True  # type: ignore[attr-defined]
             raise
