@@ -75,8 +75,9 @@ hand in
 and wrapped by Python modules under
 [`packages/py/citry_core/citry_core/`](../../packages/py/citry_core/citry_core/).
 These four must stay in sync (see CLAUDE.md Mechanism 4). The
-`template_parser` module is currently commented out in `lib.rs` pending the V3
-wiring (see Open project plans below).
+`template_parser` module is registered in `lib.rs` (`parse_template`,
+`compile_template`, and the AST classes), alongside `safe_eval`,
+`html_transform`, and the prototype `render_plan` module.
 
 ---
 

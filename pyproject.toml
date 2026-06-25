@@ -145,6 +145,10 @@ ignore = [
 "benchmarks/*" = [
     "T201",    # The comparison runner prints its results
 ]
+"packages/py/citry/citry/_proto/*" = [
+    "T201",    # The render-plan prototype harness prints its results
+    "ARG002",  # template_data(self, kwargs, slots) keeps the API signature even when slots is unused
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["citry", "citry_core"]

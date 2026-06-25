@@ -1,4 +1,6 @@
+pub mod deps_proto;
 pub mod html_transform;
+pub mod render_plan;
 pub mod safe_eval;
 pub mod template_parser;
 
@@ -63,6 +65,23 @@ fn _rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
         "HTML_VOID_ELEMENTS",
         PyFrozenSet::new(m.py(), HTML_VOID_ELEMENTS)?,
     )?;
+
+    // Render plan (prototype): a walkable Rust lowering of the compiler IR,
+    // exposed as a sibling of the template_parser string compiler.
+    let render_plan_mod = PyModule::new(m.py(), "render_plan")?;
+    m.add_submodule(&render_plan_mod)?;
+    render_plan_mod.add_function(wrap_pyfunction!(
+        crate::render_plan::compile_render_plan,
+        &render_plan_mod
+    )?)?;
+    render_plan_mod.add_class::<crate::render_plan::PyRenderPlan>()?;
+    render_plan_mod.add_class::<crate::render_plan::BodyEngine>()?;
+    render_plan_mod.add_class::<crate::render_plan::FoldedPlan>()?;
+
+    // Dependency collection + merge (prototype): first-seen-order dedup/union.
+    let deps_proto_mod = PyModule::new(m.py(), "deps_proto")?;
+    m.add_submodule(&deps_proto_mod)?;
+    crate::deps_proto::register(&deps_proto_mod)?;
 
     Ok(())
 }

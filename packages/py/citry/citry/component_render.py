@@ -596,7 +596,17 @@ def _render_one(
         #    relies on the flag to find component frame boundaries). A transparent
         #    component opts out: its output joins the surrounding frame and gets no
         #    data-cid marker (e.g. the <c-provide> built-in).
-        parts = _render_body(body, context)
+        if USE_BODY_ENGINE:
+            engine = _get_body_engine()
+            cached = _PLAN_CACHE.get(id(body))
+            if cached is None or cached[0] is not body:
+                plan = engine.lower(body, not extensions.has_hook("on_attrs_resolved"))
+                _PLAN_CACHE[id(body)] = (body, plan)
+            else:
+                plan = cached[1]
+            parts = engine.render(plan, context.variables, context, context.sandboxed)
+        else:
+            parts = _render_body(body, context)
     except Exception as render_error:
         if generator is None:
             raise
@@ -830,17 +840,78 @@ def _render_body(body: list[BodyItem], context: CitryContext) -> list[RenderPart
     for item in body:
         if isinstance(item, str):
             parts.append(item)
-            continue
-        try:
-            part = item.render(context)
-        except Exception as err:
-            _attach_template_position(err, item, context)
-            raise
-        if isinstance(part, CitryRender) and part.context is not context:
-            _merge_dependencies(context, part.context)
-        parts.append(part)
+        else:
+            parts.append(_render_node(item, context))
 
     return parts
+
+
+def _render_node(node: Node, context: CitryContext) -> RenderPart:
+    """
+    Render one non-string body node into a part.
+
+    This is the per-node step of ``_render_body``: render the node, attach the
+    template position to any error, and merge dependencies when the node yields
+    a ``CitryRender`` from a *different* render (an already-rendered value found
+    in an expression). Factored out so the Rust body executor can delegate the
+    node kinds it does not model back to exactly this logic.
+    """
+    try:
+        part = node.render(context)
+    except Exception as err:
+        _attach_template_position(err, node, context)
+        raise
+    if isinstance(part, CitryRender) and part.context is not context:
+        _merge_dependencies(context, part.context)
+    return part
+
+
+# Experimental Rust body executor (off by default). When enabled, the body walk
+# runs in Rust for static text, simple attribute regions, and scalar `{{ expr }}`
+# interpolation, delegating every other node back to `_render_node` and every
+# non-scalar expression value to `_engine_render_value`. The output matches
+# `_render_body` part-for-part; the flag stays off until that is verified across
+# the suite, then it is promoted to a `Citry` setting.
+USE_BODY_ENGINE = False
+
+# Lowered plans keyed by the folded body's identity. The body is stored
+# alongside to pin it alive (so its id is not reused) and to verify identity.
+_PLAN_CACHE: dict[int, tuple[Any, Any]] = {}
+
+
+def _engine_render_value(value: Any, context: CitryContext) -> RenderPart:
+    """
+    Render a non-scalar expression value into a part, for the Rust executor.
+
+    Mirrors ``ExprNode.render`` (``_render_value`` with the active provides) plus
+    the cross-context dependency merge ``_render_body`` does when a node yields a
+    ``CitryRender`` from a different render.
+    """
+    part = _render_value(value, context.provides)
+    if isinstance(part, CitryRender) and part.context is not context:
+        _merge_dependencies(context, part.context)
+    return part
+
+
+@functools.cache
+def _get_body_engine() -> Any:
+    """Build the Rust ``BodyEngine`` once, capturing the invariant references."""
+    from citry.citry_element import CitryElement  # noqa: PLC0415
+    from citry.constness import Const  # noqa: PLC0415
+    from citry.nodes import ElementAttrsNode, ExprNode, TemplateHtmlAttr  # noqa: PLC0415
+    from citry.slots import Slot  # noqa: PLC0415
+    from citry_core import _rust  # noqa: PLC0415
+
+    return _rust.render_plan.BodyEngine(
+        ExprNode,
+        ElementAttrsNode,
+        TemplateHtmlAttr,
+        Const,
+        (Slot, CitryElement, CitryRender),
+        _engine_render_value,
+        _render_node,
+        _attach_template_position,
+    )
 
 
 def _attach_template_position(err: Exception, node: BodyItem, context: CitryContext) -> None:

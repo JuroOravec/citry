@@ -24,7 +24,7 @@
 # - Functions without `self` are treated as module-level functions.
 #   This matches how typeshed defines modules.
 
-from typing import Literal
+from typing import Any, Literal
 
 ########################################################
 # HTML transform
@@ -353,3 +353,92 @@ class template_parser:
 
     HTML_VOID_ELEMENTS: frozenset[str]
     """HTML void elements (elements that cannot have children, e.g. ``<br/>``)."""
+
+
+########################################################
+# Render plan (prototype)
+########################################################
+
+class render_plan:
+    # Functions
+    def compile_render_plan(
+        template: template_parser.Template,
+        lang: str | None = None,
+    ) -> render_plan.RenderPlan: ...
+
+    class RenderPlan:
+        """A compiled render plan: a flat body walked by the Rust executor."""
+
+        def render(
+            self,
+            body: list[Any],
+            variables: dict[str, Any],
+            context: Any,
+            if_select: Any,
+            for_iter: Any,
+            prepare: Any,
+            render_foreign: Any,
+        ) -> str:
+            """Walk the plan and return the assembled HTML string.
+
+            ``body`` is the live Python node list from ``generate_template()``;
+            its items line up one-to-one with the plan by position. ``variables``
+            is the per-component scope passed to ``{{ expr }}`` evaluation, and
+            ``context`` is the ``CitryContext`` used to render any node kind the
+            plan does not model in Rust. ``if_select``, ``for_iter``, ``prepare``,
+            and ``render_foreign`` are the Python helpers the walk calls for
+            ``<c-if>`` branch selection, ``<c-for>`` iteration, child-component
+            preparation, and rendering an unmodelled node (a ``<c-slot>``, ...).
+            """
+
+        @property
+        def node_count(self) -> int:
+            """Number of plan entries (static-text and node entries)."""
+
+        def kinds(self) -> list[str]:
+            """A coarse label for each entry: ``"text"``, ``"expr"``,
+            ``"element_attrs"``, or ``"foreign:<NodeName>"``."""
+
+    # A const-folded body lowered for the Rust body executor: built once by
+    # BodyEngine.lower and cached per component + const signature.
+    class FoldedPlan: ...
+
+    # Walks a lowered body in Rust into a list[RenderPart]; static text, simple
+    # attribute regions, and scalar interpolation run in Rust, every other node
+    # and any non-scalar expression value is handed to a Python callback.
+    class BodyEngine:
+        def __init__(
+            self,
+            expr_type: Any,
+            attrs_type: Any,
+            template_attr_type: Any,
+            const_proxy: Any,
+            special_types: Any,
+            render_value: Any,
+            render_node: Any,
+            attach_position: Any,
+        ) -> None: ...
+        def lower(self, body: list[Any], attrs_fast_path: bool) -> render_plan.FoldedPlan: ...
+        def render(
+            self,
+            plan: render_plan.FoldedPlan,
+            variables: dict[str, Any],
+            context: Any,
+            sandboxed: bool,
+        ) -> list[Any]: ...
+
+
+########################################################
+# Dependency collection + merge (prototype)
+########################################################
+
+class deps_proto:
+    # A record is (class_id, component_id, js_vars_hash, css_vars_hash).
+    def dedup_first_seen(
+        records: list[tuple[str, str, str | None, str | None]],
+    ) -> list[tuple[str, str, str | None, str | None]]:
+        """First-seen-order dedup of dependency records handed in from Python."""
+
+    def bench_native_collect(n_distinct: int, n_levels: int) -> int:
+        """Build and dedup records entirely in Rust (no marshalling); return the
+        distinct count. The in-process speed if records already lived in Rust."""
