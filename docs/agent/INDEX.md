@@ -136,6 +136,19 @@ runtime node classes the compiler output references. The detailed, dated
 snapshot of where this stands is
 [`docs/../TODO/project_status_june_2026.md`](../../TODO/project_status_june_2026.md).
 
+### Rust render walk (built, measured ~parity, archived in git)
+
+Moving the render body-walk to Rust was prototyped and then built out into a full
+production engine (`BodyEngine` / `FoldedPlan`). It was byte-identical but only
+reached ~parity (about 1.06x on a markup-heavy page, parity on the
+construction-bound benchmark), not a beat, so it was removed from the live code
+rather than kept. The full implementation, its design doc (`render_plan_rust.md`),
+and the measurements are preserved in commit `b7b2f4e` (taken back out at
+`60e1980`); `git revert 60e1980`, or a cherry-pick from `b7b2f4e`, brings it
+forward. The motivation that could still justify it is portability (a host-agnostic
+walk that JS/PHP/Go reuse), not speed. Full write-up:
+[`performance.md`](../design/performance.md) section 6.9.
+
 ---
 
 For the reasoning behind these rules and the incidents that shaped them, see

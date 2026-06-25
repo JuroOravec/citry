@@ -500,7 +500,9 @@ So no lever short of the Rust-walk project reaches parity: that project gets to
 ~parity (and is the only route to parallelism, 6.8); the runtime sandbox fast
 path is ~2-3% and security-sensitive; the remaining Python micro-opts are low
 single digits. The honest decision is binary: commit to the Rust-walk
-architecture, or accept ~1.3x as where a Python component engine lands.
+architecture, or accept ~1.3x as where a Python component engine lands. (That
+decision was taken and settled - the engine was built out, measured, and
+archived; see 6.9.)
 
 ### 6.8 Parallelism is the same lever, not a separate one
 
@@ -512,6 +514,48 @@ caveats). `multiprocessing` and subinterpreters cannot share the render tree. So
 parallelism is reachable only *through* the Rust walk (no GIL, `rayon` over
 independent sub-trees) - it is the same project, which is a further reason to
 prioritize the prototype above over more piecewise Python tuning.
+
+### 6.9 Postscript: the full engine was built, measured, and archived (2026-06-25)
+
+The binary decision in 6.7 was taken: the prototype was built out into a full
+production body engine and measured, to settle "roughly parity, not a beat" with a
+real implementation rather than the isolated-walk estimate.
+
+What was built: a Rust `BodyEngine` (with a `FoldedPlan` that lowers a const-folded
+body once and caches it) that walks the body in Rust - static text, simple
+attribute regions, and scalar `{{ expr }}` interpolation - emitting the real
+`list[RenderPart]` and delegating every other node (components, slots, control
+flow, non-scalar values) back to Python. It crosses to Python only for expression
+eval and the in-walk hooks, and was gated behind a default-off flag.
+
+What it measured (byte-identical everywhere - 823 rendering tests plus the 203 KB
+benchmark):
+
+- **~parity on a real, construction-bound page** (the large benchmark: 12.5 ->
+  12.7 ms, 0.98-1.0x). The first cut, walking the Python body item-by-item, was
+  ~3-6% *slower* (the per-item `get_item`/`isinstance` crossings cost more than the
+  string work saved); pre-lowering the body into the Rust-side `FoldedPlan` removed
+  that and brought it to parity.
+- **~1.06x on a markup-heavy page** (40 components x 24 attributes + 12
+  interpolations: 1.13 -> 1.06 ms), the regime where string work dominates -
+  exactly where the prototype's isolated 1.8x came from, attenuated by the
+  unavoidable per-component crossings.
+
+So the production measurement confirmed the prediction: the body walk reaches
+parity on a real page and wins only modestly where string work dominates. Not a
+beat; the page stays construction-bound (section 8), and the expression-eval floor
+stays in Python.
+
+**It was removed from the live code but preserved in git history**, so a future
+portability or multi-language port (the real reason to want a host-agnostic Rust
+walk - see the section 6 opening) can pick it up:
+
+- The full implementation, its design doc (`render_plan_rust.md`, with the complete
+  contract, callback ABI, and measurements), and the prototype harness live in
+  commit **`b7b2f4e`** ("refactor: Rust renderer proof of concept (rejected)").
+- It was taken back out of the tree in **`60e1980`** ("revert: remove the Rust
+  render engine from the live code").
+- To bring it forward again: `git revert 60e1980`, or cherry-pick from `b7b2f4e`.
 
 ## 7. Working rules for optimization
 

@@ -24,7 +24,7 @@ An id is generated in two steps:
 
 The result is the same length and about the same chance of a clash as a fully
 random id, but much cheaper to produce: one counter step and three lookups
-instead of six random draws. See docs/design/construction_cost.md.
+instead of six random draws. See docs/design/performance.md section 8.
 """
 
 from __future__ import annotations
