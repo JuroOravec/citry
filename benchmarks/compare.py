@@ -12,8 +12,8 @@ Engines:
 - ``django``           - vanilla Django templates (vendored DJC scenario)
 - ``django-components``- the DJC component scenario (vendored)
 - ``citry``            - the citry port, plain inputs
-- ``citry-const``      - the citry port with Const-marked inputs
-                         (the scenario's CONST_MODE constant flipped to True)
+- ``citry-const``      - a separate scenario file that marks each component's
+                         render-invariant literals Const (large scenario only)
 
 Test types (mirroring upstream django-components PR #999):
 
@@ -58,14 +58,16 @@ BASELINE_ENGINE = "django"
 class Engine:
     key: str
     file_stem: str
-    const_mode: bool | None = None
 
 
 ENGINES = [
     Engine("django", "test_benchmark_django"),
     Engine("django-components", "test_benchmark_djc"),
     Engine("citry", "test_benchmark_citry"),
-    Engine("citry-const", "test_benchmark_citry", const_mode=True),
+    # The Const variant is its own scenario file (per-component Const, not a
+    # flag), so it only exists for the large scenario; the small scenario has
+    # no render-invariant literals to mark, so its citry-const cell is skipped.
+    Engine("citry-const", "test_benchmark_citry_const"),
 ]
 
 TEST_TYPES = ["startup", "import", "first", "subsequent"]
@@ -98,15 +100,33 @@ def build_cell_script(engine: Engine, size: str, test_type: str) -> str:
         payload = get_benchmark_script(path, imports_only=True)
     elif test_type == "startup":
         setup = ""
-        payload = get_benchmark_script(path, const_mode=engine.const_mode)
+        payload = get_benchmark_script(path)
     else:
-        setup = get_benchmark_script(path, const_mode=engine.const_mode)
+        setup = get_benchmark_script(path)
         setup += "\n\nrender_data = gen_render_data()\n"
         if test_type == "subsequent":
             setup += "render(render_data)\n"
         payload = "render(render_data)"
 
-    return _TIMING_TEMPLATE.format(setup=setup, payload=payload)
+    return _hoist_future_imports(_TIMING_TEMPLATE.format(setup=setup, payload=payload))
+
+
+def _hoist_future_imports(script: str) -> str:
+    """
+    Move any ``from __future__ import ...`` lines to the top of the script.
+
+    A scenario file may start with a ``__future__`` import (citry uses one for
+    lazy annotations), but the timing wrapper prepends code before the sliced
+    payload, which would leave the future import past the first statement (a
+    SyntaxError). Hoisting keeps it legal.
+    """
+    future_lines = []
+    other_lines = []
+    for line in script.splitlines():
+        (future_lines if line.startswith("from __future__ import ") else other_lines).append(line)
+    if not future_lines:
+        return script
+    return "\n".join([*future_lines, *other_lines])
 
 
 def time_cell(script: str, rounds: int) -> list[int]:

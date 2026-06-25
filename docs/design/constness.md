@@ -259,6 +259,12 @@ Phase 2 is more powerful and more dangerous (identity, `isinstance`, hashing,
 and C-level operations are all sharp edges). Phase 1 is the early, useful
 foothold.
 
+A narrow, static slice of Phase 2 shipped later, without the general taint
+machinery: **expression propagation** at the kwarg boundary (section 15.3) marks
+an expression's result `Const` when every variable it reads is already `Const`.
+The fuller forms (a `Computed` value, deep const for nested literals) were explored
+and parked; see section 15.
+
 ### 4.2 The "all const" criterion is really "uses only const vars"
 
 A natural first cut is "if all inputs are const, the whole output is static."
@@ -670,3 +676,176 @@ component-boundary placeholder's territory (section 5.1, still parked).
   such unless its inputs are wrongly marked).
 - A child using the same slot name in several `<c-slot>` tags bakes the
   text in each place; that is correct and needs no special handling.
+
+## 15. Folding more: deep-const, Computed, and expression propagation
+
+Evaluating expressions is about 8% of a repeat render, and working out element
+attributes about 10% (the large benchmark). Folding already removes some of that
+for all-constant expressions (sections 3-4), but on a real page it barely moves
+render time, because most of a page loops over data that changes every render
+(see [benchmarking.md](benchmarking.md)). Three ideas were explored to fold more.
+
+They all run into one wall, the same one section 4.1 calls "a value that is
+transformed loses the marker":
+
+- **The read-and-compute barrier.** `Const` is a see-through wrapper, so
+  `Const(d)['k']`, `Const(o).attr`, and `Const(5) + 1` all hand back the plain,
+  unwrapped value. Looping over a constant list gives non-constant items, and
+  deriving anything from a constant input drops the marker. That is why marking
+  things constant helps a loop-over-data page so little, and all three ideas below
+  are really about getting past this barrier.
+
+The benchmark's expression mix shows the ceiling: of 364 dynamic `c-*` attributes,
+248 are bare variables (mostly loop/data reads), ~36 are pure literals, and only 8
+compute over a constant; of 47 `{{ }}` expressions, none compute over constants at
+all. The page reads per-render data; it does not compute over constants.
+
+The three ideas:
+
+1. **Deep const for literal collections** - mark nested literals inside a literal
+   dict/list, not just the container (15.1).
+2. **`Computed(lambda: ...)`** - a Vue-`computed`-style value returned from
+   `template_data` that stays constant even after you compute something from a
+   constant, by tracking which `Const` inputs the computation read. This is an
+   opt-in form of the Phase 2 taint that section 4.1 parked (15.2).
+3. **Expression propagation** - if every variable an expression reads is `Const`,
+   mark its result `Const` too. **This one shipped** (15.3).
+
+### 15.1 Deep const for literal collections (assessed, not built)
+
+**How it would work.** At the single marking site (4.1), when the attribute is a
+literal (reads no variables) and the value is a dict/list/tuple/set, recurse and
+wrap each nested literal, mirroring `freeze_const`'s container walk. No compiler
+change.
+
+**What it actually changes.** Less than it looks. The cache key is *unaffected*,
+because `freeze_const` already recurses and unwraps for keying (so
+`freeze_const(Const([Const(1), 2]))` already equals `freeze_const([1, 2])`). The
+only new behavior is that a nested element stays `Const` if a child later forwards
+it to a *grandchild* as a kwarg (for example `c-x="js_props['attachments']"` inside
+the child). That is the sole payoff.
+
+**Applicability.** Small. The benchmark has 2 literal dicts and 8 literal lists,
+most of them *mixed* with a variable (`['border-b-2', styling['tab']]`), and mixed
+collections are correctly never marked at all (a variable means the expression is
+not a pure literal). The fully-literal ones are passed wholesale to a child via
+`c-bind`, not subscripted into a grandchild, so deep marking buys nothing for them.
+
+**Verdict.** Mostly redundant with the existing freeze recursion. Worth doing only
+if a real workload forwards inner literals down two component levels. One hazard:
+wrapping dict *keys* in a proxy can break C-level APIs (`getattr`, `json.dumps`)
+that reject markers (section 4.1).
+
+### 15.2 `Computed(lambda: ...)` (assessed, not built)
+
+**How it would work.** A new class. Because the wrapper unwraps on access, deriving
+a value from a `Const` (`"/" + Const(base)`, or `theme.sidebar_link` with `theme`
+const) loses the marker, so `template_data` returns a plain field that
+`extract_const_vars` ignores. A `Computed(lambda)` would run its lambda under a
+tracker that records which `Const` objects had their value read, then key the
+result on exactly those. `freeze_const` already gives each `Const` a stable key to
+contribute. The open question is how the read set maps onto the cache signature (a
+set of `(name, frozen value)` pairs): contribute each read `Const`'s own pair, or
+one synthetic pair under the computed field's name. The result is a fresh object
+each render, so the key must be the stable *inputs*, never the output.
+
+**Why it is the hard one.** `template_data` is arbitrary Python, so you cannot know
+its inputs without running it; you must observe them at run time. The wrapper has
+no hook to observe an access today, so this needs a tracking-wrapper variant or
+instrumented interceptors. This is exactly the Phase 2 taint propagation that
+section 4.1 designed and parked; `Computed` is an opt-in alternative to full
+automatic taint.
+
+**Applicability.** About zero on the benchmark, for an instructive reason: the
+derivations that lose const-ness (for example `TabsManual` building
+`"border-b-2 " + theme.tab_active`) are built **inside Python loops over dynamic
+data**, so the result legitimately depends on a non-constant loop value and stays
+non-constant even with perfect tracking. `Computed` pays off for **config-heavy
+components that derive from a constant theme outside any loop** (a sidebar shell, a
+static button variant), which a data-heavy page is not.
+
+**Verdict.** The most powerful and general of the three (it is the direct answer to
+"a value stops being constant the moment you compute"), but the most complex and
+the one with the least benchmark impact. Pursue it only with a config-heavy target
+in hand.
+
+### 15.3 Expression propagation (shipped)
+
+This is the third idea, and the one that shipped, because it is the most surgical:
+a focused change at the kwarg marking gate, no new types, no access tracking.
+
+**The gap it closes.** The *body* half was already done: an `{{ expr }}` (or
+attribute region) whose variables are all const already folds to text (4.2). The
+new piece is the *child-kwarg* half. A child kwarg is marked at a separate place
+(`ComponentNode._resolve_kwargs`), which used to mark `Const` only when the
+expression read no variables. So `c-x="a + 3"` with `a` const was resolved live,
+the result came back plain (the wrapper unwrapped during eval), and the child got a
+plain kwarg that defeated its cache.
+
+**The change.** `_kwarg_is_const` broadens the gate from "reads no variables" to
+"every variable it reads is `Const` in the current scope", and the result is
+wrapped `Const`. No access tracking is needed: template expressions are sandboxed
+and pure, and their inputs are known up front, so the check is a static
+`is_const(context.variables[name])` for each variable. (This is the key difference
+from `Computed`, whose inputs are not knowable without running arbitrary code.) The
+literal case is the no-variable special case of the same rule, so it is unchanged.
+
+**What it measured** (eval count = calls to the compiled `safe_eval` callable;
+output compared byte-for-byte; A/B against the old no-variable-only rule):
+
+| page shape | output identical | eval count off -> on | repeat render off -> on |
+|---|---|---|---|
+| large benchmark (data-heavy) | yes | 2577 -> 2577 (0%) | 12.28 -> 12.43 ms |
+| config nav, rich child (6 const exprs x 200) | yes | 1601 -> 401 (**-75%**) | 2.55 -> 2.46 ms (**-3.8%**) |
+| config nav, lean child (1 const expr x 200) | yes | 601 -> 401 (-33%) | 1.99 -> 2.23 ms (**+12%**) |
+
+What the numbers settle:
+
+- **Correct everywhere.** Output is byte-identical on every shape: `Const` is
+  transparent, so propagating it changes only what folds, not what renders.
+- **Zero on the common case.** A data-heavy page gets no eval reduction (its child
+  kwargs are per-render data) and pays only a tiny cost: one `is_const` lookup per
+  variable of each expression attribute. On the benchmark that is within noise.
+- **A real but conditional win on config-heavy pages, because it trades
+  expression-eval for cache-key work.** When a child is fed kwargs computed
+  entirely from constant inputs, those kwargs now propagate `Const`, the child
+  folds its body on them, and many identical children collapse onto one cache
+  entry. The eval count drops 33-75%. But each child now pays to *freeze* its const
+  kwargs into a cache key, so the wall-clock only improves when the eval work saved
+  outweighs that freeze cost: the rich child speeds up, the lean child slows down.
+  This is the same trade const already makes for literal const kwargs; expression
+  propagation just extends it to computed ones.
+
+So it is worth keeping for what it unlocks (automatic fold reuse for design-system
+and app-shell components whose children derive from a constant theme), with the
+honest caveat that it is not a free win and does **not** move the data-heavy
+benchmark.
+
+**Correctness** (four adversarial passes, each with a runnable reproducer; no new
+wrong output or crash):
+
+- It does **not** inherit the body fold's staleness. The body fold bakes an
+  all-const `{{ expr }}` once, so an *impure* const expression in a body goes stale
+  (`"1"`, `"1"`, `"1"`). Expression propagation recomputes the expression live in
+  `_resolve_kwargs` every render and wraps only the fresh result, so its output is
+  always current (`"1"`, `"2"`, `"3"`). It is strictly more correct here.
+- One caveat: because the marking is automatic, an *impure* expression over const
+  inputs (one whose result changes between renders even though its inputs are
+  marked const, e.g. reading a mutable const object's changing field) mints a fresh
+  cache signature each render, churning the child's body cache. Output stays
+  correct and the cache is bounded by its LRU (512 entries), so this is a "your
+  component will not cache" cost, not a bug - the same trap section 9 documents for
+  marking an ever-changing value `Const`. The rule stands: an expression's const
+  inputs should be genuine constants.
+
+### 15.4 If you pick the unbuilt ideas up again
+
+The honest test for deep const and `Computed` is narrow: *do they fold a meaningful
+fraction of a config-heavy component's body, even though they do nothing for a
+data-heavy one?* Two cheap instruments answer it without fighting timing noise:
+count how many `fold_body` nodes become foldable with vs without the feature, and
+count `safe_eval` evaluations per render; then confirm with a config-heavy
+microbenchmark (a nav whose body is a literal item list and whose classes derive
+from a `Const(theme)` outside any loop). Build `Computed` only if those numbers
+justify the much larger machinery; deep const can wait for a concrete two-level
+forwarding case, since it adds nothing to the cache key it was assumed to help.

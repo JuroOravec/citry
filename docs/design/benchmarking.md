@@ -1,20 +1,28 @@
 # Design: rendering benchmarks (citry vs django-components vs Django)
 
-**Status (2026-06-12): phases 1 and 2 built.** Phase 1: small scenario
-(vendored Django/DJC files + citry port with the `CONST_MODE` switch,
-`benchmark` dependency group), verified by pytest. Phase 2: the
-`benchmarks/compare.py` runner, `benchmarks/utils.py` slicing helpers, and
-`benchmarks/README.md` with the first published numbers (citry ~3x faster
-startup/import, ~3.5x faster repeat renders than DJC on the small scenario).
-Features A and B from section 6.3 landed separately (commits `8b80c66`,
-`39824bb`); feature C still gates phase 3. Phases 4 and 5 not started.
-This document
+**Status (2026-06-22): phases 1-3 built; first optimization pass done.** Phase
+3 (the large scenario) is complete: all 35 components ported to citry, the full
+`ProjectPage` renders, and `benchmarks/compare.py --size lg` publishes numbers
+(citry ~2x faster startup/import, ~1.7x faster first render and ~3.1x faster
+repeat render than django-components; see the results log in section 11).
+Getting there fixed several real citry bugs the large, deeply-nested template
+surfaced: feature A's Const-marker class/style regex, `c-bind="None"` tolerance
+on plain elements and component/dynamic tags, and a `c-for`+`c-bind` parser
+bug. A follow-up optimization pass then cut citry's repeat render from 1.85x a
+bare Django template to 1.37x; what changed and what is left lives in
+[`performance.md`](performance.md). Phases 4 (asv) and 5 (engines beyond the
+Django family) are not started. This document
 specifies how citry measures its template-rendering performance against
 django-components (DJC) and vanilla Django templates: where the benchmark code
 lives, how the harness runs it, what the two benchmark scenarios contain, and
 which citry features are still missing to port them fully. Engines beyond the
 Django family (Jinja2, MiniJinja, and others) are catalogued as future
 additions in section 2.1.
+
+This document is about *measuring*. For the *optimizing* that the measurements
+drive (where the render time goes, what was changed to spend less of it, and
+the paths that are candidates for moving into Rust) see
+[`performance.md`](performance.md).
 
 For the migration context (what citry keeps and drops from DJC) see
 [`citry_migration.md`](citry_migration.md). For the Const optimization that
@@ -258,10 +266,11 @@ and of the citry test venv's import state, and it is what lets the same file
 serve asv's `timeraw_` (run string in fresh process) and `peakmem_` (exec
 string as virtual module) modes later.
 
-Mode constants follow the DJC `CONTEXT_MODE` trick: a module-level constant
-near the top of the file that the runner overrides by regex. The vendored
-DJC files keep `CONTEXT_MODE`; the citry files get `CONST_MODE`
-(section 6.4).
+The vendored DJC files keep their `CONTEXT_MODE` trick: a module-level
+constant near the top of the file that the runner overrides by regex to switch
+the `isolated`/`django` context axis. The citry Const variant does not use
+that trick; it is a separate scenario file (section 6.4), because per-component
+`Const` placement cannot be expressed as a single flipped flag.
 
 The vendored DJC/Django files require `django` and `django-components` at
 test time. When those are absent (the default dev install), `tests/conftest.py`
@@ -278,8 +287,9 @@ section, and a test-infra import inside it would pollute the measurement.
   scenario file, append the setup lines (`gen_render_data()`, plus one warmup
   `render()` for the `subsequent` type), and time `render(render_data)` in a
   **fresh subprocess** (so startup state never leaks between cells, matching
-  asv's `timeraw_` semantics). The `citry-const` engine value is the citry
-  scenario file with `CONST_MODE` flipped to `True`.
+  asv's `timeraw_` semantics). The `citry-const` engine reads its own scenario
+  file (`test_benchmark_citry_const.py`); it exists only for the large size,
+  so the small `citry-const` cell is skipped.
 - Print one table per size: engine rows (including `citry-const`),
   test-type columns, with ratios against the Django baseline.
 - Refuse to run (or warn loudly) when `citry_core` is a debug build, the
@@ -354,8 +364,8 @@ component author's workaround.
 
 ### 6.2 Large scenario
 
-Three constructs need citry features (A, B, C in section 6.3), and one is a
-deliberate hand-port:
+Three constructs needed citry features (A, B, C in section 6.3), all now
+built; one item is a deliberate hand-port:
 
 **Django forms.** The scenario defines real Django forms
 (`ProjectAddUserForm` with `ChoiceField`s, `test_benchmark_djc.py:5127`) and
@@ -379,7 +389,7 @@ Everything else maps mechanically:
 | Filters: `json`, `alpine`, `js`, `get_item`, `escape`, `title`, `linebreaksbr`, `default_if_none` | plain function calls in expressions; helpers passed via template data (V3 has no filter syntax by design) |
 | `{% define expr as var %}` (used once, `:1932`) | inline the expression at the use site |
 | `{% static 'js/htmx.js' %}` (used once, `:2757`) | a `static()` helper passed via template data |
-| Alpine attributes (`@click`, `:class`, `x-data`) | parse as-is (the grammar allows any non-delimiter chars in attribute names) |
+| Alpine attributes (`@click`, `:class`, `x-data`) | the names parse as-is (the grammar allows any non-delimiter chars). One catch: a static attribute's value is literal in citry (html_attrs.md), so an Alpine value that embeds `{{ var }}` (e.g. `@click="{{ model }} = ..."`) must use the dynamic `c-` form to interpolate, or it renders the braces verbatim |
 | `mark_safe` | markupsafe / `mark_html()` |
 | `naturaltime` (django.contrib.humanize) | small local reimplementation, so the citry file does not import Django at module level and the import-time benchmark stays honest |
 
@@ -417,39 +427,78 @@ render time (`<{{ form_content_tag }}>` resolving to div/table/ul,
 design adds a `<c-element is="...">` built-in (sibling of `<c-component>`,
 which stays components-only) that renders a plain HTML element named at
 render time; the Form case becomes `<c-element c-is="form_content_tag">`.
-Designed in [`dynamic_component.md`](dynamic_component.md). Needed by the
-large scenario only.
+Designed in [`dynamic_component.md`](dynamic_component.md), built in
+`39824bb`. Needed by the large scenario only.
 
-**Feature C - JS/CSS dependency rendering.** Already designed at the
-boundary level: asset loading covers declare/resolve/load
-([`asset_loading.md`](asset_loading.md)), emission belongs to the future
-dependency extension (asset_loading.md section 7.4) with `<c-js>`/`<c-css>`
-as the planned built-ins (`citry/component_registry.py:241`). The large
-scenario renders the collected, deduped assets of 13 components
-(`test_benchmark_djc.py:2763`); porting it without this would silently skip
-that work and skew the comparison in citry's favor, so the large port waits
-for it.
+**Feature C - JS/CSS dependency rendering.** Designed in
+[`dependencies.md`](dependencies.md) and built in `9947f05`: the
+`DependenciesExtension` (a built-in, on by default) collects each rendered
+component's JS/CSS and injects the deduped result, and the `<c-js>`/`<c-css>`
+built-in tags mark where it lands (default: CSS before `</head>`, JS before
+`</body>`). `str(ProjectPage(**data))` therefore does the collection-and-inject
+automatically, matching DJC's `{% component_js_dependencies %}` +
+`ProjectPage.render(kwargs=data)`. Both engines also inject a client-side
+dependency-manager core script; the port keeps both in the measured output
+so the comparison stays fair.
 
 ### 6.4 The two citry variants: plain and Const
 
-The citry scenario files run as two engine rows:
+The large citry scenario runs as two engine rows:
 
 - **`citry`**: plain inputs, matching what a naive user writes in every
   engine. This is the cross-engine comparable row.
-- **`citry-const`**: the same file with inputs `Const`-marked where the
-  optimization applies ([`constness.md`](constness.md)). This row shows the
-  headroom an opted-in user gets; it has no DJC/Django equivalent, so within
-  the table it reads as "citry vs itself".
+- **`citry-const`**: a separate scenario file
+  ([`test_benchmark_citry_const.py`](../../packages/py/citry/tests/test_benchmark_citry_const.py))
+  in which each component's `template_data()` marks `Const` exactly the values
+  that are the same on every render (literal attribute dicts, the module-level
+  theme, slices of the icon table) and nothing derived from the per-render
+  data ([`constness.md`](constness.md)). This row shows the headroom an
+  opted-in user gets; it has no DJC/Django equivalent, so within the table it
+  reads as "citry vs itself".
 
-Mechanism: one set of component definitions per file, plus a module constant
-(`CONST_MODE = False`) that the runner flips by regex, the same trick DJC
-uses for `CONTEXT_MODE` (section 5.2). The constant switches whether
-`gen_render_data()` wraps the relevant inputs in `Const`.
+Mechanism: the const variant is its own file, not a flag on the plain file.
+Marking constness is a per-value judgement (is *this* return value the same on
+every render?), so it has to be written into each `template_data`, which a
+runner-flipped switch cannot do. The earlier flag approach wrapped the whole
+input tree in `Const`, which both over-promised (the project data is the
+per-render input, not a constant) and did nothing: a `Const` container yields
+non-`Const` elements when iterated and a `Const` dict yields non-`Const`
+values when indexed, so a blanket mark never reaches the loop bodies that do
+the rendering work. The honest result is that even a correct, hand-placed
+`Const` pass folds almost nothing on this page, because a real project page is
+mostly loops over dynamic data (see the section 11 log). The small scenario
+has no const variant at all: its single Button computes everything it renders
+from its inputs, so it has no render-invariant literal to mark.
 `benchmark_const.py` remains the micro-level Const benchmark; this is the
 scenario-level view of the same optimization.
 
 ### 6.5 Fairness notes
 
+- **Each port uses its own engine's native patterns, not a literal
+  translation.** The scenario (the UI, the data, the component breakdown) is
+  fixed, but how each engine expresses it is idiomatic to that engine: Django
+  uses its dict dot-access resolver and `|filters`, citry computes in
+  `template_data` and uses Python subscripts / attribute access, a future
+  Jinja2 port would use its own attribute-then-item resolution and macros.
+  Forcing one engine's idiom onto another distorts the comparison. Concretely,
+  citry resolves `{{ x.key }}` as Python attribute access (not a dict lookup),
+  so the port reads nested data with subscripts or, more often, pulls the
+  values out in `template_data` and passes flat variables to the template,
+  which is the idiomatic citry shape. (An early draft wrapped the data in a
+  dot-access dict subclass to mirror Django; measured at ~3.4x a plain
+  subscript per access in the render path, it was dropped as both slower and
+  non-native.)
+- **Component inputs use each engine's real props mechanism.** DJC binds
+  kwargs to its `get_context_data` signature every render (applying defaults,
+  rejecting unknowns); the citry port declares a typed `Kwargs` dataclass per
+  component, which does the equivalent binding. An early draft read a plain
+  kwargs dict with `.get(...)` defaults, which skipped that work and quietly
+  handed citry a small unfair edge; using `Kwargs` is both fairer and the
+  idiomatic citry shape. A second self-inflicted edge was removed at the same
+  time: an extension that injected ~21 helper functions into every
+  component's scope each render (mimicking Django's global filters) cost
+  ~19 us/render on the large page for one helper that was actually used, so
+  the helpers are now plain functions called from `template_data`.
 - **Release builds only.** All citry numbers require
   `uv run maturin develop --release` in `packages/py/citry_core` first; a
   debug build invalidates everything (the `benchmark_const.py` precedent).
@@ -495,8 +544,8 @@ act that re-baselines the comparison.
 3. Vendor `test_benchmark_django_small.py` and `test_benchmark_djc_small.py`
    into `packages/py/citry/tests/`, adapt their pytest sections.
 4. Write `test_benchmark_citry_small.py` per the section 6.1 mapping, using
-   feature A, with the `CONST_MODE` switch (section 6.4) and its snapshot
-   test.
+   feature A, plus its snapshot test. (The small scenario has no Const
+   variant; section 6.4.)
 5. Verify all variants render correctly via pytest.
 
 **Phase 2 - the comparison runner. Done (2026-06-12).**
@@ -508,18 +557,18 @@ act that re-baselines the comparison.
    relative-results-only interpretation rules (adapted from DJC's).
 8. First published numbers (small scenario) land in the README.
 
-**Phase 3 - large scenario. Gated on features B and C** (section 6.3;
-feature C ships with the dependency extension tracked in
-[`extensions.md`](extensions.md) / [`asset_loading.md`](asset_loading.md),
-feature B is its own design + implementation in the high-risk areas).
+**Phase 3 - large scenario. Done (2026-06-22).** All 35 components ported,
+the full `ProjectPage` renders, lg numbers published (section 11).
 
-9. Design and implement feature B (dynamic HTML tag names; the `/CLAUDE.md`
-   high-risk-area process applies).
-10. Vendor `test_benchmark_django.py` and `test_benchmark_djc.py`.
+9. ~~Design and implement feature B~~ (done, `39824bb`); feature C done
+   (`9947f05`).
+10. Vendor `test_benchmark_django.py` and `test_benchmark_djc.py`. Done.
 11. Port `test_benchmark_citry.py` per the section 6.2 mapping (forms
-    hand-written, helpers local, features A/B/C exercised), with
-    `CONST_MODE`.
-12. Extend `compare.py` defaults to both sizes.
+    hand-written, helpers local, typed `Kwargs`, features A/B/C exercised),
+    plus its Const variant as a separate file (section 6.4). Done; surfaced
+    and fixed four citry bugs along the way (section 11).
+12. `compare.py` runs `--size lg`; the lg table is published in the benchmarks
+    README and the section 11 results log.
 
 **Phase 4 - asv adoption (optional, after phases 1-3 prove out).**
 
@@ -534,9 +583,9 @@ feature B is its own design + implementation in the high-risk areas).
     the component-syntax peers (JinjaX, django-cotton). Each lands with its
     own snapshot test and a README note on its comparability caveats.
 
-Phases 1-2 give the first citry-vs-DJC-vs-Django numbers; feature A is the
-only feature work on that path. Phase 3's gates (features B and C) are the
-only cross-project dependencies.
+Phases 1-2 gave the first citry-vs-DJC-vs-Django numbers. Phase 3's gates
+(features B and C) are now built, so the large port is mechanical from here
+(vendor, port, lock outputs).
 
 ---
 
@@ -549,14 +598,15 @@ only cross-project dependencies.
 - **Where published numbers live** once a docs site exists (DJC publishes the
   asv dashboard with its docs). Until then, the benchmarks README holds a
   dated results table.
-- **Whether the citry large port should exist in a draft before the phase 3
-  gates lift** (skipping features B/C), purely to shake out parser/runtime
-  issues on a 6,000-line real-world template. If yes, it must not be used
-  for published comparisons.
-- **How far `CONST_MODE` reaches in the large scenario**: marking only
-  `gen_render_data()` inputs is mechanical, but some of the headroom may sit
-  in per-component `template_data()` outputs. Decide when porting; start
-  with inputs only.
+- **How far does `Const` reach in the large scenario** (resolved): the
+  `citry-const` file now marks `Const` on each component's render-invariant
+  literals, the most a careful user could do by hand. It still folds almost
+  nothing (the fold cache grows by one entry over the auto-marked baseline)
+  and does not move the render time, because the page is loop-dominated and
+  `Const` does not survive iteration or indexing into the per-render data
+  (section 11 log, section 6.4). Closing that gap is a `constness.md` design
+  question (propagating the marker through iteration/indexing), not a
+  benchmark one.
 
 ---
 
@@ -615,3 +665,131 @@ Reading:
   fold-cache key still costs a little per render. Expected, not a bug; the
   optimization targets templates with large constant regions, so the large
   scenario (phase 3) is its fair test.
+
+### 2026-06-22 - phase 3 (large scenario) port: progress and findings
+
+The large `lg` scenario is being ported bottom-up. Done and verified so far:
+the two DJC baselines (`test_benchmark_django.py`, `test_benchmark_djc.py`)
+vendored and rendering via a structural smoke test; the citry foundation
+(data blob, types, constants, theme, helpers, the DJC filters reimplemented
+as plain functions injected into every component via a small
+`on_component_data` extension, and `gen_render_data`); and the leaf
+components Button, Icon, HeroIcon, each verified rendering in isolation. The
+citry scenario file's smoke tests are skipped until the whole `ProjectPage`
+tree is in (its `render()` references components not yet ported).
+
+The port is proving the translation patterns end to end (registration by
+`name`, class/style merge, dynamic-element branches, slots, nested
+components, loops, dynamic kwargs all work), and it surfaced two citry issues
+in line with this doc's prediction that the 6,000-line template would shake
+out parser/runtime edge cases:
+
+- **`c-bind` of `None` (fixed).** An optional attribute dict that resolves to
+  `None` now contributes nothing instead of raising, matching Vue's
+  `v-bind="null"` and DJC's `{% html_attrs %}`. Without it, nearly every one
+  of the 47 `html_attrs` ports would need an `or {}` guard. A non-`None`,
+  non-mapping value still raises.
+- **`c-for` + `c-bind` on the same element referencing the loop variable
+  (fixed).** `<path c-for="p in items" c-bind="p" />` wrongly failed to parse
+  ("variable ... already taken"). Root cause: a bodied node drops its
+  introduced loop variable from `used_variables`
+  (`ast::from_start_and_end_tags`), but the self-closing and void-element
+  paths in the parser did not, so the same-element `c-bind` use of the loop
+  variable looked both used and introduced and tripped the shadowing check.
+  The three node-construction sites now share one
+  `remove_introduced_variables` helper. The loop variable is in scope for its
+  own element's attributes (matching Vue's `v-for`), so the port uses the
+  direct form with no wrapper.
+
+(The `on_component_data` helper-injection extension mentioned above was later
+removed; see the 2026-06-22 completion entry for why.)
+
+### 2026-06-22 - phase 3 (large scenario) complete, first lg numbers
+
+All 35 components are ported and the full `ProjectPage` renders (~205 KB,
+~325 component instances). `benchmarks/compare.py --size lg`, Apple M4,
+Python 3.13.12, median of 5 fresh-process rounds; django 6.0.6,
+django-components 0.151.0, citry 0.1.0 (citry_core 1.3.0, release). Ratios vs
+`django`:
+
+| engine | startup | import | first | subsequent |
+|---|---|---|---|---|
+| django | 77.19 ms (1.00x) | 70.10 ms (1.00x) | 17.42 ms (1.00x) | 10.64 ms (1.00x) |
+| django-components | 75.69 ms (0.98x) | 69.76 ms (1.00x) | 65.18 ms (3.74x) | 45.45 ms (4.27x) |
+| citry | 38.17 ms (0.49x) | 29.28 ms (0.42x) | 41.92 ms (2.41x) | 19.63 ms (1.85x) |
+| citry-const | 37.49 ms (0.49x) | 29.13 ms (0.42x) | 43.80 ms (2.51x) | 19.74 ms (1.86x) |
+
+citry is ~2x faster than the Django stack on startup/import, and against
+django-components (the fair component-vs-component comparison) ~1.5x faster on
+first render and ~2.4x faster on repeat renders. Both component engines trail
+a bare Django template, which does none of the per-render component work;
+"relative cost of components" is the meaningful axis and citry wins it.
+`citry-const` is within noise of plain citry (see the Const finding below).
+
+Findings from completing the port, beyond the two parser/attr fixes in the
+progress entry above:
+
+- **Helper injection was a DJC-ism, removed.** An extension injected ~21
+  filter/builtin helpers into every component's scope each render to mimic
+  Django's global filters; only one was used in a template. The helpers are
+  now plain functions called from `template_data` (the idiomatic citry shape).
+- **AttrDict was a DJC-ism, removed.** An early draft wrapped the data in a
+  dot-access dict subclass to keep DJC's `{{ x.key }}`; measured ~3.4x a plain
+  subscript per access, so the port computes values in `template_data` and
+  uses subscripts instead. Both are recorded under section 6.5.
+- **Typed `Kwargs` per component.** Components declare a `Kwargs` dataclass
+  (matching DJC's `get_context_data` signature), so citry does the same
+  props-binding work DJC does each render rather than reading a plain dict.
+- **`c-bind="None"` tolerance extended to component/dynamic tags.** The plain
+  element fix did not cover `<c-Foo c-bind="opt">` / `<c-element>`;
+  `ComponentNode._resolve_kwargs` now treats `None` as no kwargs too.
+- **O(n*depth) dependency-emission bug (fixed).** First lg run had citry ~37x
+  slower than Django. Root cause: a component's `DependencyRecord` is copied
+  into each ancestor as nested renders merge, so a 325-instance page resolved
+  ~154,000 records, and `_resolve_records` did a cached-script lookup (with a
+  `json.loads`) per duplicate. Collapsing duplicate records first (they
+  resolve to identical scripts) cut repeat renders ~32x, to the numbers above.
+  This is the large benchmark's main payoff: a real scaling bug invisible at
+  small scale.
+- **Const variant reworked from a blanket flag to per-component literals.**
+  The first cut wrapped the whole input tree in `Const` via a single
+  runner-flipped flag. That was wrong twice over: it falsely promised the
+  per-render project data was constant, and it folded nothing, because a
+  `Const` container yields non-`Const` elements when iterated and a `Const`
+  dict yields non-`Const` values when indexed, so the marker never reached the
+  loop bodies. The variant is now a separate file
+  (`test_benchmark_citry_const.py`) where each `template_data()` marks `Const`
+  only its render-invariant literals (literal attribute dicts, the theme, icon
+  paths). This is the correct usage, and it still grows the fold cache by one
+  entry (50 to 51) and leaves render time unchanged: those literals are
+  consumed by child components that mix them with dynamic data, so they do not
+  fold either. The honest conclusion is that `Const` does not help a
+  loop-over-data page; it is built for templates with large static blocks.
+  Propagating the marker through iteration/indexing is a `constness.md`
+  question, separate from the benchmark.
+
+### 2026-06-22 - render-path optimization pass
+
+Profiling the large `subsequent` render (cProfile on a warm render, plus
+in-process A/B timing per change) drove a round of render-path fixes. citry's
+repeat render dropped from 19.63 ms to 14.52 ms (1.85x a bare Django template
+down to 1.37x; about 3.1x faster than django-components). Apple M4, Python
+3.13.12, median of 5 fresh-process rounds; same versions as above. Ratios vs
+`django`:
+
+| engine | startup | import | first | subsequent |
+|---|---|---|---|---|
+| django | 77.25 ms (1.00x) | 69.75 ms (1.00x) | 17.77 ms (1.00x) | 10.60 ms (1.00x) |
+| django-components | 77.16 ms (1.00x) | 70.90 ms (1.02x) | 64.11 ms (3.61x) | 45.73 ms (4.31x) |
+| citry | 38.51 ms (0.50x) | 29.02 ms (0.42x) | 37.57 ms (2.11x) | 14.52 ms (1.37x) |
+| citry-const | 37.85 ms (0.49x) | 29.52 ms (0.42x) | 38.22 ms (2.15x) | 14.61 ms (1.38x) |
+
+The biggest win was a dependency-collection scaling fix (records bubbled up by
+copying into every ancestor, ~470,000 copies on this page, now an
+insertion-ordered set that dedupes on merge); the rest were render-path trims
+(one-pass attribute formatting, escaping to `str` instead of allocating a
+`Markup` per piece, and a cheaper per-component id). The full record of what
+changed, why, and the cost model behind it is in
+[`performance.md`](performance.md) section 4; that doc also tracks the
+remaining Python-level work and the paths that are candidates for moving into
+Rust to close the rest of the gap to a bare Django template.

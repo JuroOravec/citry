@@ -17,23 +17,13 @@ of the caller's import state.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 TESTS_START_MARKER = "# ----------- TESTS START ------------ #"
 IMPORTS_END_MARKER = "# ----------- IMPORTS END ------------ #"
 
-# The CONST_MODE assignment in the citry scenario files. Anchored to the line
-# start so the explanatory comment above it never matches.
-_CONST_MODE_RE = re.compile(r"^CONST_MODE.*$", flags=re.MULTILINE)
 
-
-def get_benchmark_script(
-    file_path: str | Path,
-    *,
-    imports_only: bool = False,
-    const_mode: bool | None = None,
-) -> str:
+def get_benchmark_script(file_path: str | Path, *, imports_only: bool = False) -> str:
     """
     Read a benchmark scenario file and slice it into a runnable script.
 
@@ -41,8 +31,6 @@ def get_benchmark_script(
         file_path: Path to a ``test_benchmark_*.py`` scenario file.
         imports_only: Return only the import section (for measuring import
             cost). Everything after the ``IMPORTS END`` marker is dropped.
-        const_mode: When not ``None``, rewrite the scenario's ``CONST_MODE``
-            constant to this value. Only the citry scenario files have one.
 
     Returns:
         The script source, with the pytest section always removed.
@@ -53,7 +41,5 @@ def get_benchmark_script(
 
     if imports_only:
         contents = contents.split(IMPORTS_END_MARKER)[0]
-    elif const_mode is not None:
-        contents = _CONST_MODE_RE.sub(f"CONST_MODE = {const_mode}", contents, count=1)
 
     return contents

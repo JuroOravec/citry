@@ -24,7 +24,7 @@ Engines:
 | `django` | Vanilla Django templates (vendored DJC scenario; it still imports django-components for `{% html_attrs %}`, so read it as "the relative cost of components", not pure Django) |
 | `django-components` | The DJC component scenario, vendored byte-close to upstream |
 | `citry` | The citry port of the same UI, plain inputs |
-| `citry-const` | The citry port with inputs `Const`-marked (the opt-in render-caching optimization, see `docs/design/constness.md`) |
+| `citry-const` | The same port with each component's render-invariant literals marked `Const` (the opt-in render-caching optimization, see `docs/design/constness.md`); large scenario only |
 
 Test types, mirroring upstream so the methodology stays comparable:
 
@@ -79,7 +79,6 @@ rounds per cell. Versions: django 6.0.6, django-components 0.151.0, citry
 | django | 75.35 ms (1.00x) | 71.45 ms (1.00x) | 1.11 ms (1.00x) | 39.5 us (1.00x) |
 | django-components | 72.47 ms (0.96x) | 72.05 ms (1.01x) | 1.44 ms (1.29x) | 206.6 us (5.23x) |
 | citry | 25.96 ms (0.34x) | 26.08 ms (0.37x) | 866.6 us (0.78x) | 58.9 us (1.49x) |
-| citry-const | 26.05 ms (0.35x) | 25.80 ms (0.36x) | 849.7 us (0.76x) | 64.4 us (1.63x) |
 
 Highlights, with the relative-only caveat above:
 
@@ -88,12 +87,56 @@ Highlights, with the relative-only caveat above:
   though still ~1.5x slower than a bare Django template (the gap is the
   component machinery: per-render component construction, slot resolution,
   and id marking).
-- `citry-const` shows no benefit on this scenario, and its repeat renders sit
-  within noise of (or slightly behind) plain citry: the Button template is
-  one element, so almost nothing is left to fold, while computing the
-  fold-cache key still costs a little per render. The optimization is built
-  for templates with large constant regions; the large scenario (phase 3)
-  is where it gets a fair test.
+- There is no `citry-const` row here. The single Button computes every value
+  it renders from its inputs (the classes, the attributes), so nothing it
+  returns is a render-invariant literal to mark constant. Const has a fair
+  test in the large scenario, where there are static literals to mark.
+
+## Results (large scenario)
+
+Measured 2026-06-22 on an Apple M4, Python 3.13.12, median of 5 fresh-process
+rounds per cell. Versions: django 6.0.6, django-components 0.151.0, citry
+0.1.0 (citry_core 1.3.0, release build). Ratios are vs the `django` row. The
+large scenario is the full project-management page: 35 components, ~325
+component instances rendered, JS dependency collection, provide/inject,
+slots/fills, and dynamic elements.
+
+| engine | startup | import | first | subsequent |
+|---|---|---|---|---|
+| django | 77.25 ms (1.00x) | 69.75 ms (1.00x) | 17.77 ms (1.00x) | 10.60 ms (1.00x) |
+| django-components | 77.16 ms (1.00x) | 70.90 ms (1.02x) | 64.11 ms (3.61x) | 45.73 ms (4.31x) |
+| citry | 38.51 ms (0.50x) | 29.02 ms (0.42x) | 37.57 ms (2.11x) | 14.52 ms (1.37x) |
+| citry-const | 37.85 ms (0.49x) | 29.52 ms (0.42x) | 38.22 ms (2.15x) | 14.61 ms (1.38x) |
+
+Highlights, with the relative-only caveat above:
+
+- citry imports and starts up about 2x faster than the Django stack.
+- Against django-components (the fair comparison, since both pay the
+  component-machinery cost) citry is about 1.7x faster on first render and
+  about 3.1x faster on repeat renders.
+- Both component engines are slower than a bare Django template, which does
+  none of the per-render component work (construction, slots, dependency
+  collection, id marking); the relevant question is the relative cost of
+  using components, and there citry wins. After a round of render-path
+  optimization (see the section 11 log in `docs/design/benchmarking.md`),
+  citry's repeat render is about 1.4x a bare Django template, down from 1.85x.
+- `citry-const` is within noise of plain citry here. The const variant
+  (`test_benchmark_citry_const.py`) marks each component's genuinely
+  render-invariant values constant (literal attribute dicts, the theme, icon
+  paths) and nothing else, which is the correct way to use Const. It folds
+  almost nothing extra on this page because a real project page is mostly
+  loops over per-render data, and a value marked constant stops being
+  constant the moment it is iterated over or indexed into. Const pays off on
+  templates with large blocks that are the same every render; a data-driven
+  page is the opposite, so the honest result here is "no speedup."
+
+A note on getting here: the first large-scenario run had citry ~37x slower
+than Django, which turned out to be a real O(n*depth) bug in citry's
+dependency emission (a component's record was re-counted once per ancestor as
+nested renders merged, so a 325-instance page resolved ~154,000 records).
+Collapsing duplicate records before resolution fixed it (~32x faster repeat
+renders) and is what the numbers above reflect. This is the large benchmark
+doing its job: surfacing a real scaling bug that the small scenario could not.
 
 ## What's here
 
