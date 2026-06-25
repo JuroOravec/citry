@@ -42,14 +42,12 @@ class CitrySettings:
         cache: The cache backend spec (a :class:`citry.cache.CitryCache`
             object or a ``"path.to.Cache"`` import string). ``None`` gives the
             instance its own in-memory cache. The live backend built from this
-            spec is ``Citry.cache``. See docs/design/dependencies.md
-            section 10.
+            spec is ``Citry.cache``.
         sandbox_expressions: Whether template expressions (``{{ ... }}`` and
             dynamic ``c-*`` attributes) are evaluated in the security sandbox.
-            On by default. Turning it off evaluates expressions as plain Python
-            (no builtins exposed, same as the sandbox), which is faster but
-            removes all access controls; only do so when every template comes
-            from a trusted source. See docs/design/constness.md.
+            On by default. Turning it off evaluates expressions as plain Python,
+            which is faster but removes security guardrails.
+            Only do so when every template comes from a trusted source.
 
     """
 

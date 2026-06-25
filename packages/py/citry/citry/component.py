@@ -104,8 +104,7 @@ class ComponentMeta(type):
         Deterministic across processes and restarts (it is derived from the
         import path, not from object identity), so it can key cache entries
         and script URLs that one worker writes and another serves. Reverse
-        lookup goes through ``Citry.get_component_by_class_id``. See
-        docs/design/dependencies.md section 4.1.
+        lookup goes through ``Citry.get_component_by_class_id``.
         """
         cached: str | None = cls.__dict__.get("_class_id")
         if cached is None:
@@ -197,8 +196,7 @@ class ComponentMeta(type):
         ``slots`` is a reserved input name: it is taken out of the kwargs and
         carried separately as the component's slot fills
         (``MyComp(title="Hi", slots={"header": ...})``), so a component cannot
-        take a regular kwarg named ``slots``. See docs/design/slots.md
-        section 9.
+        take a regular kwarg named ``slots``.
 
         In citry, calling a Component class is the **composition** phase.
         It creates a CitryElement that describes what to render, without
@@ -255,7 +253,7 @@ class Component(metaclass=ComponentMeta):
     Base class for all Citry components.
 
     A component is a reusable unit of UI defined by:
-    - A **template** (Citry V3 HTML-like syntax)
+    - A **template** (Citry template syntax)
     - Optional **typed inputs** (via inner ``Kwargs``, ``Slots`` classes)
     - A **data method** that maps inputs to template variables
 
@@ -517,8 +515,7 @@ class Component(metaclass=ComponentMeta):
         (``Component.js``). The dict is serialized to JSON and delivered to
         the component's ``$onComponent`` callback in the browser; identical
         data is sent to the browser only once, however many instances share
-        it. Consumed by the built-in ``dependencies`` extension (see
-        docs/design/dependencies.md section 5).
+        it. Consumed by the built-in ``dependencies`` extension.
 
         Args:
             kwargs: The keyword arguments passed to the component.
@@ -543,8 +540,7 @@ class Component(metaclass=ComponentMeta):
         ``{"row-color": "red"}`` is usable in the CSS as
         ``var(--row-color)``, scoped to this component's elements. Identical
         data across renders shares one generated stylesheet. Consumed by the
-        built-in ``dependencies`` extension (see docs/design/dependencies.md
-        section 5).
+        built-in ``dependencies`` extension.
 
         Args:
             kwargs: The keyword arguments passed to the component.
@@ -592,7 +588,7 @@ class Component(metaclass=ComponentMeta):
         just before the template renders. Return ``None`` (the default) to
         render the template as usual. Return content to use it as the
         component's whole output instead; the template is then not rendered
-        at all. Accepted content (see docs/design/on_render.md section 3):
+        at all. Accepted content:
 
         - a ``str``, used as-is (NOT autoescaped: it is this component's own
           output, the same trust as its template)
@@ -636,7 +632,7 @@ class Component(metaclass=ComponentMeta):
                         return "<p>Something went wrong</p>"
                     return None
 
-        The protocol (full detail in docs/design/on_render.md section 3.2):
+        The protocol:
 
         - A bare ``yield`` (or ``yield None``) on the first yield means
           "render my template as usual"; yielding content means "use this as
@@ -663,7 +659,7 @@ class Component(metaclass=ComponentMeta):
         Any component rendered below this one (including components inside
         slot content rendered below it) can read the data with
         ``self.inject(key)``. The data does NOT enter the template variables;
-        descendants opt in explicitly. See docs/design/provide.md.
+        descendants opt in explicitly.
 
         Call this from ``template_data``. The data is frozen into an
         immutable payload at this point, so what descendants inject always

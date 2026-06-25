@@ -134,10 +134,9 @@ class CitryRender:
         Turn this render into a final HTML string.
 
         Each component's root element(s) get a ``data-cid-<id>`` marker so the
-        rendered HTML records which component produced which part of the page
-        (see docs/design/deferred_rendering.md section 6), and the JS/CSS
-        collected from the rendered components is placed into the output
-        (docs/design/dependencies.md section 7).
+        rendered HTML records which component produced which part of the page,
+        and the JS/CSS collected from the rendered components is placed into the
+        output per the chosen strategy and position.
 
         Args:
             deps_strategy: How to handle the collected JS/CSS.
@@ -194,8 +193,7 @@ class Placeholder:
     A Placeholder marks a position whose content is only known when the whole
     page is serialized: the ``<c-js>`` / ``<c-css>`` built-ins render one
     each, and the dependencies extension fills them with the collected
-    script/style tags via the ``on_serialize`` hook
-    (docs/design/dependencies.md section 7.3).
+    script/style tags via the ``on_serialize`` hook.
 
     Attributes:
         key: What belongs at this spot (e.g. ``"deps:js"``). The serializer

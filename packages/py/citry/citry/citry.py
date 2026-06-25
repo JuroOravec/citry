@@ -209,8 +209,7 @@ class Citry:
 
         The web-integration adapters (``citry.contrib.asgi`` and friends)
         mount these into the host application; the routes serve cached
-        component JS/CSS, the client runtime, and extension endpoints. See
-        docs/design/dependencies.md section 9.
+        component JS/CSS, the client runtime, and extension endpoints.
         """
         return self.extensions.urls
 
@@ -255,8 +254,8 @@ class Citry:
         Look up a registered component class by its ``class_id``.
 
         ``class_id`` is the stable identifier (``MyComp.class_id``) used in
-        cache keys and script URLs (docs/design/dependencies.md section 4.1).
-        Raises ``KeyError`` when no registered class has that id.
+        cache keys and script URLs. Raises ``KeyError`` when no registered
+        class has that id.
         """
         comp_cls = self._classes_by_id.get(class_id)
         if comp_cls is None:

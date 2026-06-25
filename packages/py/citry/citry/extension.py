@@ -134,12 +134,10 @@ class OnComponentDataContext:
     """The template variables from ``Component.template_data()`` (mutable)."""
     js_data: dict[str, Any]
     """The JS variables from ``Component.js_data()`` (mutable). Consumed by
-    the built-in ``dependencies`` extension (docs/design/dependencies.md
-    section 5)."""
+    the built-in ``dependencies`` extension."""
     css_data: dict[str, Any]
     """The CSS variables from ``Component.css_data()`` (mutable). Consumed by
-    the built-in ``dependencies`` extension (docs/design/dependencies.md
-    section 5)."""
+    the built-in ``dependencies`` extension."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,8 +272,7 @@ class ExtensionCommand:
     A stub for now: an extension lists command classes in ``Extension.commands``,
     and the manager can look one up by name. There is no command *runner* yet;
     that arrives with the CLI/tooling work. (Extension HTTP routes are a
-    separate, built surface: ``Extension.urls``, see docs/design/extensions.md
-    section 11.)
+    separate surface, ``Extension.urls``.)
     """
 
     name: ClassVar[str]
@@ -304,7 +301,7 @@ class ExtensionConfig:
 
     The component back-reference is a weakref, and the component may be ``None``
     for extensions that run outside a component lifecycle (for example a future
-    Storybook extension). See docs/design/extensions.md section 5.1.
+    Storybook extension).
     """
 
     component_class: ClassVar[type[Component]]
@@ -345,8 +342,8 @@ class Extension:
     Subclass this, set ``name`` (a lowercase Python identifier), and implement the
     ``on_*`` hooks you care about. Every hook has an empty default, so an
     extension only overrides what it needs (the manager calls only the hooks an
-    extension actually overrides). The full hook catalog is in
-    docs/design/extensions.md.
+    extension actually overrides). The ``on_*`` methods below are the full hook
+    catalog.
     """
 
     name: ClassVar[str]
@@ -448,9 +445,8 @@ class Extension:
     def on_attrs_resolved(self, ctx: OnAttrsResolvedContext) -> dict[str, Any] | None:
         """
         Called after an HTML element's dynamic attributes resolved to their
-        final dict, before it is formatted into the output (see
-        docs/design/html_attrs.md section 5.5). Return a new dict to replace
-        the attributes, or ``None`` to keep them.
+        final dict, before it is formatted into the output. Return a new dict
+        to replace the attributes, or ``None`` to keep them.
 
         Fires per element per render, only for elements with at least one
         dynamic attribute (a ``c-*`` value or a ``c-bind`` spread).
@@ -700,7 +696,7 @@ class ExtensionManager:
         An extension defines ``name`` by overriding it (see
         ``_extensions_with_hook``). ``name`` need not be a hook declared on
         :class:`Extension`, so an extension can fire its own custom hook for
-        others to implement (docs/design/extensions.md section 9).
+        others to implement.
 
         Examples:
             Most named hooks delegate here. ``on_component_data`` notifies every

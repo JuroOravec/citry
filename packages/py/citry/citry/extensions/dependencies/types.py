@@ -50,8 +50,7 @@ class DependencyRecord(NamedTuple):
     ``CitryContext.extra`` per component render, and the notes bubble up to
     the root as nested renders are consumed. At serialize time the collected
     records are resolved into the actual ``Script``/``Style`` tags; the heavy
-    content lives in the cache, keyed by the record's fields
-    (docs/design/dependencies.md section 6).
+    content lives in the cache, keyed by the record's fields.
     """
 
     class_id: str
@@ -150,7 +149,7 @@ class Dependency:
         Render as a JSON-ready dict with ``tag``, ``attrs``, and ``content``.
 
         This is the shape the client-side manager consumes when it constructs
-        the element in the browser (docs/design/dependencies.md section 8).
+        the element in the browser.
         """
         tag_name, all_attrs, content = self._render()
         return {"tag": tag_name, "attrs": all_attrs, "content": content}

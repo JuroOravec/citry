@@ -90,7 +90,7 @@ if TYPE_CHECKING:
 # rendered, not when it is constructed.
 class Node:
     """
-    Base class for the runtime nodes the V3 compiler output instantiates.
+    Base class for the runtime nodes the template compiler output instantiates.
 
     A node renders to a body part (a ``str`` or a nested ``CitryRender``) against
     the render-scoped ``CitryContext``. Concrete nodes override ``render``.
@@ -99,7 +99,7 @@ class Node:
     ``<c-fill>`` tags) takes part in fill collection through
     ``Node.collect_fills()`` instead of ``Node.render()``. The default says
     the node is not allowed there; nodes that are (``FillNode``, the control-flow nodes)
-    override it. See docs/design/slots.md section 4.4.
+    override it.
     """
 
     def render(self, context: CitryContext) -> RenderPart:
@@ -538,7 +538,7 @@ class ElementAttrsNode(Node):
     Emitted when an HTML element (not a component) has at least one dynamic
     attribute: a ``c-*`` value or a ``c-bind`` spread. The node covers ALL of
     the tag's attributes, static ones included, because the set resolves as
-    one unit (docs/design/html_attrs.md sections 3 and 4):
+    one unit:
 
     - Contributions collect left to right in source order; ``c-bind``
       contributes each entry of its mapping (which must be a ``Mapping``).
@@ -753,14 +753,13 @@ class ComponentNode(Node):
         does not render the child here: doing so would make one component
         render the next and so on, hitting Python's recursion limit on deeply
         nested pages. ``render_impl`` renders the child later, with its own
-        ``CitryContext``, and copies its dependencies into the parent (see
-        docs/design/deferred_rendering.md section 4).
+        ``CitryContext``, and copies its dependencies into the parent.
 
         The attributes and fill structure are read now, while this component is
         still rendering, so a loop variable from an enclosing ``<c-for>`` has
         the right value. Fill *bodies* stay lazy: each becomes a ``Slot`` that
         closes over the current scope and renders only when the child invokes
-        it (see docs/design/slots.md section 4).
+        it.
         """
         component = context.component
         if component is None:
@@ -1052,7 +1051,7 @@ class SlotNode(Node):
 
     Rendering resolves the slot name, looks up the fill the component
     received, and invokes it with the slot data; with no fill, the slot's own
-    body renders as the fallback. See docs/design/slots.md section 5.
+    body renders as the fallback.
 
     """
 

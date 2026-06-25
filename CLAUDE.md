@@ -261,6 +261,11 @@ relevant crate's `AGENTS.md`, then its `docs/agent/INDEX.md`, then
   locking it into the assertion. Do not hand-compute token offsets or codegen
   strings from memory. A throwaway exploration harness (deleted afterward) is
   the established way to capture the output.
+- **Component `template` / `js` / `css` are multiline strings.** Write these
+  class attributes as multiline triple-quoted strings (`"""` or `'''`) with the
+  HTML/JS/CSS on its own lines, never flattened onto one line, even when short.
+  This holds in real component files and in docs examples alike (it reads better
+  and matches how components are actually authored).
 
 ## House style
 

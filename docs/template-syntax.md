@@ -78,7 +78,9 @@ where every builtin is available) and pass the result in:
 
 ```python
 class Cart(Component):
-    template = "<p>{{ count }} items</p>"
+    template = """
+      <p>{{ count }} items</p>
+    """
 
     def template_data(self, kwargs, slots=None):
         return {"count": len(kwargs["items"])}

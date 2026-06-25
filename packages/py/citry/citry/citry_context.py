@@ -63,10 +63,9 @@ class CitryContext:
             output). Read by nodes when evaluating expressions.
         component: The ``Component`` instance currently rendering. Gives a node
             access to the component tree (its ``citry`` registry for resolving
-            child component names, and its ``parent``/``root`` linkage). Per the
-            decision in docs/design/rendering.md section 4.1, the current
-            component is stored on the context, so each component render gets its
-            own ``CitryContext``.
+            child component names, and its ``parent``/``root`` linkage). The
+            current component is stored on the context, so each component render
+            gets its own ``CitryContext``.
         extra: Tree-wide scratch space for extensions (for example the
             collected JS/CSS dependency records). Top-level keys are
             namespaced by owner; see the module docstring.

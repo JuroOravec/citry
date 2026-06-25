@@ -88,7 +88,7 @@ class SlotContext(Generic[TSlotData]):
     ``<c-slot>`` site or expression site). ``None`` when the Slot is called
     directly, outside a render. Template-defined fills use this so their
     bodies render with the invoking site's provides; a slot function may read
-    it to inspect provided data. See docs/design/provide.md section 4.3.
+    it to inspect provided data.
     """
 
 
