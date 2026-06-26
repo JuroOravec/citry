@@ -3,7 +3,7 @@ Tests for dynamic attribute rendering on plain HTML elements
 (docs/design/html_attrs.md): the ``ElementAttrsNode`` runtime node, the
 ``c-bind`` spread, True/False/None attribute values, class/style merging
 across sources, the ``on_attrs_resolved`` extension hook, and how attribute
-regions take part in the Const fold.
+regions take part in the Const precompute.
 """
 
 # ruff: noqa: ANN
@@ -14,7 +14,7 @@ import pytest
 
 from citry import Citry, Component, Const, Extension
 from citry.component_render import _compile_nested_template
-from citry.constness import fold_body
+from citry.constness import precompute_const_parts
 from citry.nodes import ElementAttrsNode
 
 _CID_RE = re.compile(r' data-cid-\w+=""')
@@ -214,32 +214,32 @@ class TestOnAttrsResolvedHook:
         assert calls == ["p"]
 
 
-class TestConstFolding:
+class TestConstPrecomputing:
     def _body(self, template):
         return _compile_nested_template(template, None)()
 
-    def test_literal_attr_region_folds_to_text(self):
+    def test_literal_attr_region_precomputes_to_text(self):
         body = self._body("<div c-class=\"['a', 'b']\">hi</div>")
         assert any(isinstance(item, ElementAttrsNode) for item in body)
-        folded = fold_body(body, {})
-        assert folded == ['<div class="a b">hi</div>']
+        precomputed = precompute_const_parts(body, {})
+        assert precomputed == ['<div class="a b">hi</div>']
 
-    def test_const_marked_variable_folds(self):
+    def test_const_marked_variable_precomputes(self):
         body = self._body('<div c-class="cls">hi</div>')
-        folded = fold_body(body, {"cls": Const("btn")})
-        assert folded == ['<div class="btn">hi</div>']
+        precomputed = precompute_const_parts(body, {"cls": Const("btn")})
+        assert precomputed == ['<div class="btn">hi</div>']
 
     def test_dynamic_variable_keeps_node(self):
         body = self._body('<div c-class="cls">hi</div>')
-        folded = fold_body(body, {})
-        assert any(isinstance(item, ElementAttrsNode) for item in folded)
+        precomputed = precompute_const_parts(body, {})
+        assert any(isinstance(item, ElementAttrsNode) for item in precomputed)
 
-    def test_fold_attrs_false_keeps_literal_region(self):
-        # The caller passes fold_attrs=False when an extension implements
+    def test_precompute_attrs_false_keeps_literal_region(self):
+        # The caller passes precompute_attrs=False when an extension implements
         # on_attrs_resolved, so the hook is not baked out of the body.
         body = self._body("<div c-class=\"['a', 'b']\">hi</div>")
-        folded = fold_body(body, {}, fold_attrs=False)
-        assert any(isinstance(item, ElementAttrsNode) for item in folded)
+        precomputed = precompute_const_parts(body, {}, precompute_attrs=False)
+        assert any(isinstance(item, ElementAttrsNode) for item in precomputed)
 
     def test_subscribed_hook_still_runs_with_const_inputs(self):
         # End to end: with a hook installed, a Const input must not bake the

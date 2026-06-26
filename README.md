@@ -1,11 +1,12 @@
-# Citry - Refreshingly elegant templating
+# Citry - Refreshingly elegant UI
 
-Citry is a templating engine for Python that brings the best of **Vue**, **React**,
+Citry is a **fast**, **smart**, and **elegant** **frontend framework** for Python that brings the best of **Vue**, **React**,
 **Django**, and **Jinja**.
 
 ```python
 from citry import Component
 
+# Define
 class Welcome(Component):
     class Kwargs:
         title: str
@@ -24,10 +25,13 @@ class Welcome(Component):
       </div>
     """
 
+# Compose
 component = Welcome(
     title="Welcome back",
     messages=["a", "b", "c"],
 )
+
+# Render
 html = str(component)
 ```
 

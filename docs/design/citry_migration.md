@@ -113,7 +113,7 @@ The `Const()` (#1083), expression-caching (#1473), and render-body-caching
 design (and its many edge cases) is captured separately in
 [`constness.md`](constness.md). Both the const *flow* (the
 `wrapt.ObjectProxy`-based `Const` marker, detection, and the `Citry`-scoped
-body cache keyed by const signature) and the *fold pass* are built: folding
+body cache keyed by const signature) and the *precompute pass* are built: precomputing
 pre-computes const expressions and attributes, drops untaken `<c-if>`
 branches, and unrolls small const `<c-for>` loops. Phase-2 taint tracking is
 parked.
@@ -343,7 +343,7 @@ Status legend:
 | `kwargs` / `raw_kwargs` / `slots` / `raw_slots` accessors | ✅ Done | |
 | `context` / `outer_context` | ⏭️ Skip (Django) | Django `Context`; `outer_context` deprecated (djc #1259). citry passes only props + slots between components |
 | `deps_strategy` (`document`/`fragment`/...) | ✅ Done (diverged) | `serialize(deps_strategy=..., deps_position=...)`, not context state; `fragment` raises until the client-runtime phase |
-| `Component.registry` / `Component.node` | ♻️ Superseded / ❓ Ambiguous | Registry reached via `component.citry.registry`. A back-reference to the originating `ComponentNode` is extension metadata; decide if/when an extension needs it |
+| `Component.registry` / `Component.node` | ♻️ Superseded / ❌ Drop | Registry reached via `component.citry.registry`. `ComponentNode` is an internal node type in citry, not part of the public component surface, so a `Component.node` back-reference is deliberately not carried over |
 | `is_filled` / `ComponentVars` (`{{ component_vars.* }}`) | ♻️ Superseded | djc injected template globals; in citry slots are explicit `template_data` inputs, so "is filled" is `slots.get(...)` |
 | `request`, `context_processors_data`, `as_view()`, `render_to_response()`, `response_class` | ⏭️ Skip (Django) | The view extension stays in django-components |
 | `parent` / `root` | ✅ Done | Set across the component boundary during render |
@@ -1000,7 +1000,7 @@ Ported function by function, on demand. Current state:
 
 ### `util/testing.py` (599 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -1100,7 +1100,7 @@ extension and a good dogfood test for citry's hook system.
 
 ### `extensions/autodiscovery.py` (26 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -1200,7 +1200,7 @@ packages/py/citry/
     provide.py             # Provide/inject building blocks
     media.py               # Template/JS/CSS asset loading, Media class, file index
     attrs.py               # HTML attribute merging (Vue-like class/style)
-    constness.py           # Const marker, const body cache, fold pass
+    constness.py           # Const marker, const body cache, precompute pass
     tag_rules.py           # Kwargs/Slots -> parser user_rules
     constants.py
     nodes/
@@ -1258,8 +1258,8 @@ Entries are chronological; where entries conflict, the later one wins
 not yet written for already-shipped features: provide/inject
 (`provide.py`, `<c-provide>`, `CitryContext.provides`,
 `Component.provide`/`inject`), Vue-like HTML attributes (`attrs.py`,
-`ElementAttrsNode`, the `on_attrs_resolved` hook), and the const fold pass
-(`fold_body`: expression/attr pre-computation, branch dropping, loop
+`ElementAttrsNode`, the `on_attrs_resolved` hook), and the const precompute pass
+(`precompute_body`: expression/attr pre-computation, branch dropping, loop
 unrolling).
 
 ### Test files to revisit
@@ -1598,10 +1598,10 @@ ported.
   `template` builds its own generator.
 - **Generation decoupled from rendering.** `_compile_template` (parse +
   compile + exec) is separate from `_render_body` (walk the node list, emit the
-  string). This seam is where the parked const-folding cache will slot in.
+  string). This seam is where the parked const-precomputing cache will slot in.
 - **No per-element body cache.** An earlier iteration cached the node list on
   the element; it was removed. Reusing an already-optimized body across renders
-  is the job of the const-folding cache, not the element. The full const-folding
+  is the job of the const-precomputing cache, not the element. The full const-precomputing
   and render-body-caching design (including the decision to build `Const` on
   `wrapt.ObjectProxy`) is parked in [`constness.md`](constness.md).
 - **`TemplateData` validation.** If a component declares `TemplateData`, the
@@ -1631,11 +1631,11 @@ assert str(Hello()) == "<p>Hello!</p>"  # convenience: render + serialize
 
 ### Const flow, skeleton (`citry/constness.py`, render pipeline, `Citry`)
 
-**What:** The plumbing for the const-folding feature: a `Const(value)` marker,
+**What:** The plumbing for the const-precomputing feature: a `Const(value)` marker,
 detection of const-marked context variables, a const signature, and a
 `Citry`-scoped body cache keyed by `(component class, signature)`.
 
-**Why:** Const-folding (DJC #1083) lets the engine reuse an optimized body for
+**Why:** Const-precomputing (DJC #1083) lets the engine reuse an optimized body for
 inputs the author marks constant. This lands the *flow* (so the render pipeline
 is const-aware and loads the body via the signature) without the optimization
 itself. The full design and its edge cases are in
@@ -1650,9 +1650,9 @@ itself. The full design and its edge cases are in
   and cleared by `Citry.clear()`. The signature is the frozenset of
   `(variable name, const value)` pairs; an unhashable value falls back to a
   repr stand-in for now.
-- **No folding yet.** The cached body is the unoptimized node list, equivalent
+- **No precomputing yet.** The cached body is the unoptimized node list, equivalent
   across signatures, so the cache provides the lookup structure but no speedup
-  yet. Folding (replacing all-const nodes with their results) slots into the
+  yet. Precomputing (replacing all-const nodes with their results) slots into the
   `_compile_template` / `_render_body` seam later.
 - **Markers are never unwrapped during rendering.** The `Const` markers stay
   in the render context so they flow down to descendant components, each of
@@ -1747,7 +1747,7 @@ lives in `citry/util/html.py`, a thin layer over `markupsafe` exporting
   across renders via the body cache, so it compiles once. This is lazy rather
   than at construction (the compiler's note suggested "at initialization"); lazy
   still compiles once and avoids paying for nodes that never render (for example
-  a branch folded away once const-folding exists).
+  a branch precomputed away once const-precomputing exists).
 - **`markupsafe` for escaping.** `escape()` escapes `& < > ' "`, which is safe
   in both body-text and double-quoted attribute positions. This matters because
   the compiler inlines a dynamic attribute on a plain HTML element as an
@@ -2546,7 +2546,7 @@ hooks, generator driving, error-path tracing, template-position errors, and
 
 - **One hook, wrapping rather than being the renderer.** djc's default
   `on_render` *is* `template.render(context)`; citry's framework owns body
-  building (const folding, caches, hooks), so the hook only observes and
+  building (const precomputing, caches, hooks), so the hook only observes and
   replaces output. `on_render_before`/`on_render_after` dropped
   (`template_data` and the generator's post-yield phase cover them);
   re-addable additively if ever needed.

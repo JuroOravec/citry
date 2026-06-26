@@ -276,6 +276,12 @@ relevant crate's `AGENTS.md`, then its `docs/agent/INDEX.md`, then
   - Prefer plain words over compiler/CS jargon ("computed once and reused"
     over "memoized"; "pre-render the constant parts" over "fold"; "drops the
     least recently used entry" over "LRU eviction").
+  - Do not coin a vague adjective and then reuse it as the name of a thing
+    ("flat function", "folded body", "the const-keyed body"). The adjective
+    means nothing to someone who did not build it. Say what the thing is or
+    does: "a Python function generated from the body" rather than "a flat
+    function"; "the body with its constant parts already computed" rather than
+    "the folded body". This applies to inline code comments as much as to docs.
   - A project-specific term (a pass name, a cache name, a struct role) is
     fine, but the first mention **in each file** must say in one plain
     sentence what it means or does. After that, use the term freely.

@@ -1,6 +1,6 @@
 """
 Tests for the Const optimization (citry/constness.py): the Const marker, the
-cache key built from marked values, the folding step that pre-computes the
+cache key built from marked values, the precomputing step that pre-computes the
 constant parts of a template, and the cache that stores the results.
 """
 
@@ -106,7 +106,7 @@ class TestExtractConstVars:
 
     def test_unfreezable_const_is_demoted_everywhere(self):
         # The variable must drop out of BOTH the const set and the signature,
-        # so folding and the cache key always agree.
+        # so precomputing and the cache key always agree.
         const_vars, signature = extract_const_vars({"a": Const(_Unhashable(1))})
         assert const_vars == {}
         assert signature == frozenset()
@@ -237,8 +237,8 @@ class TestConstFlow:
         assert len(c._const_body_cache) == 0
 
 
-class TestConstFold:
-    def test_const_expr_folds_to_static_text(self):
+class TestConstPrecompute:
+    def test_const_expr_precomputes_to_static_text(self):
         c = Citry()
 
         class Card(Component):
@@ -273,7 +273,7 @@ class TestConstFold:
         assert isinstance(node, ExprNode)
         assert last == "</p>"
 
-    def test_folded_value_is_escaped(self):
+    def test_precomputed_value_is_escaped(self):
         c = Citry()
 
         class Card(Component):
@@ -285,7 +285,7 @@ class TestConstFold:
 
         assert Card(v=Const("<b>")).render().serialize() == '<p data-cid-c1="">&lt;b&gt;</p>'
 
-    def test_const_none_folds_to_empty(self):
+    def test_const_none_precomputes_to_empty(self):
         c = Citry()
 
         class Card(Component):
@@ -314,7 +314,7 @@ class TestConstFold:
         assert big_body == ["big"]
         assert small_body == ["small"]
 
-    def test_const_if_with_no_match_folds_to_nothing(self):
+    def test_const_if_with_no_match_precomputes_to_nothing(self):
         c = Citry()
 
         class Card(Component):
@@ -344,7 +344,7 @@ class TestConstFold:
         (node,) = body
         assert isinstance(node, IfNode)
 
-    def test_pruned_branch_is_folded_recursively(self):
+    def test_pruned_branch_is_precomputed_recursively(self):
         c = Citry()
 
         class Card(Component):
@@ -361,7 +361,7 @@ class TestConstFold:
         assert first == "n: "
         assert isinstance(node, ExprNode)
 
-    def test_zero_variable_expr_folds_without_const_inputs(self):
+    def test_zero_variable_expr_precomputes_without_const_inputs(self):
         c = Citry()
 
         class Card(Component):
@@ -372,7 +372,7 @@ class TestConstFold:
         (body,) = c._const_body_cache.values()
         assert body == ["<p>2</p>"]
 
-    def test_slot_node_never_folds(self):
+    def test_slot_node_never_precomputes(self):
         c = Citry()
 
         class Box(Component):
@@ -398,7 +398,7 @@ class TestConstFold:
         ]
         assert len(box_bodies) == 1
 
-    def test_const_element_value_is_not_folded(self):
+    def test_const_element_value_is_not_precomputed(self):
         c = Citry()
 
         class Inner(Component):
@@ -490,7 +490,7 @@ class TestTemplateLiteralConst:
 
     def test_zero_variable_expression_attr_is_typed_const(self):
         # c-age="30" evaluates to the int 30 (not the string "30") and is a
-        # template literal, so it is marked const and the child folds on it.
+        # template literal, so it is marked const and the child precomputes on it.
         c = Citry()
 
         class Card(Component):
@@ -528,7 +528,7 @@ class TestTemplateLiteralConst:
         # a fresh equal list, and the canonical key makes it the same entry.
         Page().render()
         Page().render()
-        assert len(c._const_body_cache) == 2  # Page's body + Items' folded body
+        assert len(c._const_body_cache) == 2  # Page's body + Items' precomputed body
 
     def test_dynamic_expression_attr_is_not_marked(self):
         c = Citry()
@@ -568,7 +568,7 @@ class TestExpressionConstPropagation:
 
     def test_all_const_expression_attr_is_const_in_the_child(self):
         # base is const, so base + 1 (= 30) is const, so the child's c-if
-        # folds on `age`. If propagation failed, `age` would be plain and the
+        # precomputes on `age`. If propagation failed, `age` would be plain and the
         # IfNode would stay live.
         c = Citry()
 
@@ -616,7 +616,7 @@ class TestExpressionConstPropagation:
 
     def test_propagated_const_dedups_across_a_loop(self):
         # The win: a loop hands every child an all-const computed label, so all
-        # the children share ONE folded cache entry (the loop var `i` is not in
+        # the children share ONE precomputed cache entry (the loop var `i` is not in
         # the kwarg, so the kwarg is const every iteration and equal-valued).
         c = Citry()
 
@@ -667,7 +667,7 @@ class TestConstThroughTypedKwargs:
     def test_const_default_on_typed_kwargs_field(self):
         # A `Const(...)` default is the explicit way to mark a default value
         # constant: when the kwarg is omitted, the marked default flows
-        # through template_data and folds; when it is passed, the live value
+        # through template_data and precomputes; when it is passed, the live value
         # renders as usual (dynamic unless the caller marked it).
         c = Citry()
 
@@ -684,14 +684,14 @@ class TestConstThroughTypedKwargs:
         assert Card().render().serialize() == '<p data-cid-c1="">3</p>'
         assert Card(cols=5).render().serialize() == '<p data-cid-c2="">5</p>'
 
-        folded = [body for body in c._const_body_cache.values() if body == ["<p>3</p>"]]
+        precomputed = [body for body in c._const_body_cache.values() if body == ["<p>3</p>"]]
         dynamic = [body for body in c._const_body_cache.values() if any(isinstance(i, ExprNode) for i in body)]
-        assert len(folded) == 1
+        assert len(precomputed) == 1
         assert len(dynamic) == 1
 
 
-class TestConstFoldInsideKeptNodes:
-    def test_folds_inside_dynamic_if_branches(self):
+class TestConstPrecomputeInsideKeptNodes:
+    def test_precomputes_inside_dynamic_if_branches(self):
         c = Citry()
 
         class Card(Component):
@@ -702,7 +702,7 @@ class TestConstFoldInsideKeptNodes:
                 return dict(kwargs)
 
         # `show` and `n` are dynamic, `label` is const: the IfNode stays, but
-        # the const expression inside each branch folds to text.
+        # the const expression inside each branch precomputes to text.
         assert Card(show=True, label=Const("x"), n=7).render().serialize() == "x: 7"
         assert Card(show=False, label=Const("x"), n=7).render().serialize() == "x off"
         assert len(c._const_body_cache) == 1
@@ -735,7 +735,7 @@ class TestConstFoldInsideKeptNodes:
         assert branch_body[0] == "L"
         assert isinstance(branch_body[1], ExprNode)
 
-    def test_folds_inside_kept_for_body(self):
+    def test_precomputes_inside_kept_for_body(self):
         c = Citry()
 
         class Card(Component):
@@ -746,7 +746,7 @@ class TestConstFoldInsideKeptNodes:
                 return dict(kwargs)
 
         # `items` is dynamic, so the loop stays; the const `prefix` inside the
-        # body folds (it is the same on every iteration), while the loop
+        # body precomputes (it is the same on every iteration), while the loop
         # variable expression stays dynamic.
         assert Card(items=[1, 2], prefix=Const("p")).render().serialize() == "[p1][p2]"
         (body,) = c._const_body_cache.values()
@@ -758,15 +758,15 @@ class TestConstFoldInsideKeptNodes:
         assert loop_body[2] == "]"
 
 
-class TestConstFoldInsideSlotContent:
+class TestConstPrecomputeInsideSlotContent:
     """
-    Folding descends into slot content: fill bodies, the implicit default
+    Precomputing descends into slot content: fill bodies, the implicit default
     slot body, and slot fallback bodies all render against the variables of
     the component whose template wrote them, so const expressions inside
-    them fold like any other.
+    them precompute like any other.
     """
 
-    def test_const_expr_in_fill_body_folds(self):
+    def test_const_expr_in_fill_body_precomputes(self):
         c = Citry()
 
         class Card(Component):
@@ -791,7 +791,7 @@ class TestConstFoldInsideSlotContent:
         assert "<p>yo</p>" in out2
         assert "Dash!" in out1
 
-        # In Page's cached body, the title fill folded to text while the
+        # In Page's cached body, the title fill precomputed to text while the
         # body fill kept its dynamic expression.
         (page_body,) = [b for b in c._const_body_cache.values() if not isinstance(b[0], str)]
         (component_node,) = page_body
@@ -834,7 +834,7 @@ class TestConstFoldInsideSlotContent:
                 return dict(kwargs)
 
         # The fill's own `d` variable is per-invocation slot data, so the
-        # expression using it stays live; the const `k` folds and merges.
+        # expression using it stays live; the const `k` precomputes and merges.
         assert Page(k=Const("K")).render().serialize() == "1-K"
         (page_body,) = [b for b in c._const_body_cache.values() if isinstance(b[0], ComponentNode)]
         (fill,) = page_body[0].body
@@ -842,7 +842,7 @@ class TestConstFoldInsideSlotContent:
         assert fill.body[0].used_vars == ("d",)
         assert fill.body[1] == "-K"
 
-    def test_default_slot_body_folds(self):
+    def test_default_slot_body_precomputes(self):
         c = Citry()
 
         class Box(Component):
@@ -860,7 +860,7 @@ class TestConstFoldInsideSlotContent:
         (page_body,) = [b for b in c._const_body_cache.values() if not isinstance(b[0], str)]
         assert page_body[0].body == ["K"]
 
-    def test_slot_fallback_body_folds(self):
+    def test_slot_fallback_body_precomputes(self):
         c = Citry()
 
         class Card(Component):
@@ -871,18 +871,18 @@ class TestConstFoldInsideSlotContent:
                 return dict(kwargs)
 
         # Unfilled: the fallback renders, and with `label` const its
-        # expression folded inside the kept SlotNode.
+        # expression precomputed inside the kept SlotNode.
         assert Card(label=Const("untitled")).render().serialize() == "untitled"
         (body,) = c._const_body_cache.values()
         (slot_node,) = body
         assert isinstance(slot_node, SlotNode)
         assert slot_node.body == ["untitled"]
 
-        # Filled: the fill wins over the folded fallback, same as ever.
+        # Filled: the fill wins over the precomputed fallback, same as ever.
         assert Card(label=Const("untitled"), slots={"title": "Hello"}).render().serialize() == "Hello"
 
 
-class TestConstFoldUnroll:
+class TestConstPrecomputeUnroll:
     def test_const_loop_unrolls_to_text(self):
         c = Citry()
 
@@ -897,7 +897,7 @@ class TestConstFoldUnroll:
         (body,) = c._const_body_cache.values()
         assert body == ["<ul>1,2,3,</ul>"]
 
-    def test_unroll_folds_ifs_and_uses_empty_branch(self):
+    def test_unroll_precomputes_ifs_and_uses_empty_branch(self):
         c = Citry()
 
         class Card(Component):
@@ -943,7 +943,7 @@ class TestConstFoldUnroll:
             def template_data(self, kwargs, slots):
                 return dict(kwargs)
 
-        # The loop body is statically foldable, but the value is an element,
+        # The loop body is statically precomputable, but the value is an element,
         # which must render fresh per render: the unroll backs out and the
         # loop stays dynamic.
         element = Inner()
@@ -969,7 +969,7 @@ class TestConstFoldUnroll:
         assert not isinstance(body[0], str)
 
 
-class TestConstFoldErrors:
+class TestConstPrecomputeErrors:
     def test_failing_const_expr_stays_dynamic_and_raises_at_render(self):
         c = Citry()
 
@@ -980,7 +980,7 @@ class TestConstFoldErrors:
             def template_data(self, kwargs, slots):
                 return dict(kwargs)
 
-        # Folding must not raise: the failing expression stays a dynamic node
+        # Precomputing must not raise: the failing expression stays a dynamic node
         # and the error surfaces through the normal render path, every render.
         with pytest.raises(KeyError):
             Card(cfg=Const({"a": 1})).render().serialize()

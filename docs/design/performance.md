@@ -521,7 +521,7 @@ The binary decision in 6.7 was taken: the prototype was built out into a full
 production body engine and measured, to settle "roughly parity, not a beat" with a
 real implementation rather than the isolated-walk estimate.
 
-What was built: a Rust `BodyEngine` (with a `FoldedPlan` that lowers a const-folded
+What was built: a Rust `BodyEngine` (with a `FoldedPlan` that lowers a const-precomputed
 body once and caches it) that walks the body in Rust - static text, simple
 attribute regions, and scalar `{{ expr }}` interpolation - emitting the real
 `list[RenderPart]` and delegating every other node (components, slots, control

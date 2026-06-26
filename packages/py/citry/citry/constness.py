@@ -25,9 +25,9 @@ How the pieces in this module fit together:
   class and per combination of ``Const`` values. It keeps a bounded number of
   entries (least recently used entries are dropped first) and lives on a
   ``Citry`` instance.
-- ``fold_body`` is the pre-computing step, called **folding** in this module
-  and in docs/design/constness.md: it walks the compiled template once,
-  replaces everything that depends only on ``Const`` values with its final
+- ``precompute_const_parts`` does the **precomputing** (the name this module and
+  docs/design/constness.md use for this step): it walks the compiled template
+  once, replaces everything that depends only on ``Const`` values with its final
   text, and leaves the rest to render normally each time.
 
 Guidance for using ``Const``:
@@ -251,7 +251,7 @@ def extract_const_vars(
 
     - ``const_vars``: name -> value (still wrapped in ``Const``) for every
       variable that is marked const AND could be turned into a cache key.
-      ``fold_body`` evaluates against this mapping when it pre-computes the
+      ``precompute_const_parts`` evaluates against this mapping when it pre-computes the
       constant parts of the template.
     - ``signature``: the cache key over those same variables (see
       ``ConstSignature``).
@@ -306,7 +306,7 @@ class ConstBodyCache:
 
     A "body" is what a template compiles to: a list of static strings and
     node objects. The entry stored for a render that had ``Const`` inputs has
-    been through ``fold_body``, so the parts depending on those inputs are
+    been through ``precompute_const_parts``, so the parts depending on those inputs are
     already computed; the entry for a render with no ``Const`` inputs is the
     plain compiled body that all such renders share. Keys are
     ``(component class, ConstSignature)``.
@@ -328,7 +328,16 @@ class ConstBodyCache:
     def __init__(self, max_entries: int = DEFAULT_MAX_ENTRIES) -> None:
         self._max_entries = max_entries
         self._lock = RLock()
+        # The pre-computed body for each (component class, Const values): the
+        # template's list of static strings and nodes after the parts that
+        # depend only on constant inputs have been computed (see precompute_const_parts).
         self._entries: OrderedDict[_CacheKey, list[BodyItem]] = OrderedDict()
+        # The render function built from each body. body_compile.py turns the
+        # body's node list into one Python function that produces the body's
+        # output directly (so a render runs that function instead of walking the
+        # node list). Keyed the same way, so a function is dropped together with
+        # the body it came from.
+        self._renderers: dict[_CacheKey, Any] = {}
 
     def get_or_build(
         self,
@@ -352,20 +361,44 @@ class ConstBodyCache:
             body = build()
             self._entries[key] = body
             while len(self._entries) > self._max_entries:
-                self._entries.popitem(last=False)
+                evicted, _ = self._entries.popitem(last=False)
+                self._renderers.pop(evicted, None)
             return body
+
+    def renderer_for(
+        self,
+        comp_cls: type[Component],
+        signature: ConstSignature,
+        build_renderer: Callable[[], _T],
+    ) -> _T:
+        """
+        Return the render function for ``(comp_cls, signature)``, building it once.
+
+        Paired with ``get_or_build``: that caches the body, this caches the
+        render function compiled from it. Same key, so the function is dropped
+        when its body is evicted.
+        """
+        key = (comp_cls, signature)
+        with self._lock:
+            renderer = self._renderers.get(key)
+            if renderer is None:
+                renderer = build_renderer()
+                self._renderers[key] = renderer
+            return renderer
 
     def evict_component(self, comp_cls: type[Component]) -> None:
         """Drop every entry of one component class (hot reload invalidation)."""
         with self._lock:
-            stale = [key for key in self._entries if key[0] is comp_cls]
+            stale = [key for key in (*self._entries, *self._renderers) if key[0] is comp_cls]
             for key in stale:
-                del self._entries[key]
+                self._entries.pop(key, None)
+                self._renderers.pop(key, None)
 
     def clear(self) -> None:
         """Drop all entries."""
         with self._lock:
             self._entries.clear()
+            self._renderers.clear()
 
     def values(self) -> list[list[BodyItem]]:
         """A snapshot of the cached bodies (mainly for tests and debugging)."""
@@ -380,20 +413,20 @@ class ConstBodyCache:
 
 
 # #########################################################
-# FOLDING (the pre-computing step)
+# PRECOMPUTING (the pre-computing step)
 # #########################################################
 
-# NOTE: Folding needs the runtime node classes and CitryRender for its
+# NOTE: Precomputing needs the runtime node classes and CitryRender for its
 # isinstance checks, but citry_render imports this module (for const_value)
 # and citry.nodes imports citry_render, so importing either at the top here
-# would be circular. They are imported inside the folding functions instead;
-# folding runs once per cache entry, so the cost is a few dictionary lookups
+# would be circular. They are imported inside the precomputing functions instead;
+# precomputing runs once per cache entry, so the cost is a few dictionary lookups
 # per cache miss.
 
 
 _MAX_UNROLL_ITERATIONS: Final = 1000
 """
-The most loop iterations folding will run ahead of time (see
+The most loop iterations precomputing will run ahead of time (see
 ``_try_unroll_for``). The pre-computed text is exactly what every render
 would produce anyway, so output size is not the concern; the cap guards
 against huge or never-ending const iterables. Past it, the loop just renders
@@ -401,13 +434,13 @@ normally each time.
 """
 
 
-def fold_body(
-    body: list[BodyItem], const_vars: dict[str, Any], *, fold_attrs: bool = True, sandboxed: bool = True
+def precompute_const_parts(
+    body: list[BodyItem], const_vars: dict[str, Any], *, precompute_attrs: bool = True, sandboxed: bool = True
 ) -> list[BodyItem]:
     """
     Pre-compute the parts of ``body`` that depend only on ``const_vars``.
 
-    This is the step this module calls **folding**: given a compiled template
+    This is the step this module calls **precomputing**: given a compiled template
     (``body``, a list of static strings and node objects) and the variables
     promised to be constant (``const_vars``), do the work that depends only
     on those variables right now, once, and return a new body where that work
@@ -418,30 +451,30 @@ def fold_body(
       and replaced with its escaped text.
     - An HTML element's dynamic attribute region (``ElementAttrsNode``) whose
       variables are all const is rendered once and replaced with its text.
-      Pass ``fold_attrs=False`` to keep these regions live: the caller does
+      Pass ``precompute_attrs=False`` to keep these regions live: the caller does
       that when an installed extension implements ``on_attrs_resolved``,
       because baking the region would hide it from the extension. A region
       holding a nested-template attribute value also stays live (it renders
       fresh parts each time).
     - A ``<c-if>`` whose branch conditions use only const variables is
       decided once: only the matching branch's content remains (itself
-      folded), the other branches are dropped.
+      precomputed), the other branches are dropped.
     - A ``<c-if>`` whose conditions use non-const variables is kept (it must
       be decided on every render), but constant expressions INSIDE its
-      branches still fold.
-    - A ``<c-for>`` over a const iterable whose body folds entirely to text
+      branches still precompute.
+    - A ``<c-for>`` over a const iterable whose body precomputes entirely to text
       is run once here, and the per-iteration text is baked in (within one
       iteration, the loop variables count as const). Capped at
       ``_MAX_UNROLL_ITERATIONS``.
     - A ``<c-for>`` that cannot be pre-run is kept, but constant expressions
-      inside its body still fold: an expression that does not touch the loop
+      inside its body still precompute: an expression that does not touch the loop
       variables produces the same text on every iteration. (Loop variables
       themselves are never const; the parser forbids them from reusing an
       outer variable's name, so there is no overlap to worry about.)
     - Static strings that end up next to each other are joined.
 
     Everything else stays in place as a normal node and re-evaluates on every
-    render. That matters because the folded body is SHARED by every render
+    render. That matters because the precomputed body is SHARED by every render
     with the same const values, while their other (non-const) variables
     differ, so anything not pre-computed must still work for all of them.
 
@@ -450,16 +483,16 @@ def fold_body(
 
     - ``ComponentNode`` (a child component tag): every render of a child gets
       a fresh component instance and a fresh render id, and its slot content
-      captures the surrounding render's state. Its BODY does fold, though:
+      captures the surrounding render's state. Its BODY does precompute, though:
       fill bodies and the implicit default-slot body render against this
       component's variables, so const expressions inside slot content are
       pre-computed even while the tag itself stays.
     - ``SlotNode``: which fill it renders comes from the live component
       instance, which changes per render even when the tag itself uses no
       template variables. It also fires the ``on_slot_rendered`` hook. Its
-      fallback body folds in place, same as a fill body.
+      fallback body precomputes in place, same as a fill body.
     - ``FillNode``: stays (it is consumed when fills are collected, each
-      render), but its body folds in place.
+      render), but its body precomputes in place.
     - An expression whose VALUE is a ``Slot``, ``CitryElement``, or
       ``CitryRender``: rendering those produces per-render state (render
       ids, collected dependencies), so only values that become plain text
@@ -467,10 +500,10 @@ def fold_body(
     - Node types this step does not know (an extension may inject custom
       nodes via ``on_template_compiled``): kept as-is, to be safe.
 
-    **Folding never raises.** A const expression or condition that fails here
+    **Precomputing never raises.** A const expression or condition that fails here
     is kept as a normal node, so the error (if any) surfaces during a render,
     through the normal path, exactly as it would without the optimization.
-    The trade-off of folding inside kept ``<c-if>`` branches is WHEN a const
+    The trade-off of precomputing inside kept ``<c-if>`` branches is WHEN a const
     expression runs: it is evaluated once here even if the branch it sits in
     is not taken by this particular render (a later render sharing the cache
     entry may take it). Citry expressions are expected to have no side effects
@@ -487,7 +520,7 @@ def fold_body(
 
     ``const_vars`` maps the const template variables to their values (still
     wrapped in ``Const``; the wrapper behaves like the value), as produced by
-    ``extract_const_vars``. With no const variables the pass still folds
+    ``extract_const_vars``. With no const variables the pass still precomputes
     expressions that use no variables at all and joins static strings.
 
     The input list and its nodes are not modified; a kept node whose interior
@@ -495,36 +528,36 @@ def fold_body(
     unchanged ones is safe).
     """
     const_names = frozenset(const_vars)
-    # Fold-time evaluation must use the same sandbox mode as the live render, so
-    # a node's evaluator is compiled once in the right mode (see _fold_expr).
-    fold_context = CitryContext(variables=dict(const_vars), sandboxed=sandboxed)
-    return _fold_into(body, const_names, fold_context, fold_attrs=fold_attrs)
+    # Precompute-time evaluation must use the same sandbox mode as the live render, so
+    # a node's evaluator is compiled once in the right mode (see _precompute_expr).
+    precompute_context = CitryContext(variables=dict(const_vars), sandboxed=sandboxed)
+    return _precompute_into(body, const_names, precompute_context, precompute_attrs=precompute_attrs)
 
 
-def _fold_into(
+def _precompute_into(
     body: list[BodyItem],
     const_names: frozenset[str],
-    fold_context: CitryContext,
+    precompute_context: CitryContext,
     *,
-    fold_attrs: bool,
+    precompute_attrs: bool,
 ) -> list[BodyItem]:
-    """Fold one body list (the recursion step of ``fold_body``)."""
-    folded: list[BodyItem] = []
+    """Precompute one body list (the recursion step of ``precompute_const_parts``)."""
+    precomputed: list[BodyItem] = []
     for item in body:
-        _fold_item(item, const_names, fold_context, folded, fold_attrs=fold_attrs)
-    return _merge_static(folded)
+        _precompute_item(item, const_names, precompute_context, precomputed, precompute_attrs=precompute_attrs)
+    return _merge_static(precomputed)
 
 
-def _fold_item(
+def _precompute_item(
     item: BodyItem,
     const_names: frozenset[str],
-    fold_context: CitryContext,
+    precompute_context: CitryContext,
     out: list[BodyItem],
     *,
-    fold_attrs: bool,
+    precompute_attrs: bool,
 ) -> None:
-    """Fold one body item, appending the result(s) to ``out``."""
-    # Imported lazily to break the import cycle; see the NOTE above fold_body.
+    """Precompute one body item, appending the result(s) to ``out``."""
+    # Imported lazily to break the import cycle; see the NOTE above precompute_const_parts.
     from citry.nodes import (  # noqa: PLC0415
         ComponentNode,
         ElementAttrsNode,
@@ -540,28 +573,28 @@ def _fold_item(
         return
 
     if isinstance(item, ExprNode) and set(item.used_vars) <= const_names:
-        out.append(_fold_expr(item, fold_context))
+        out.append(_precompute_expr(item, precompute_context))
         return
 
     if isinstance(item, ElementAttrsNode):
-        if fold_attrs and set(item.used_vars) <= const_names:
-            out.append(_fold_element_attrs(item, fold_context))
+        if precompute_attrs and set(item.used_vars) <= const_names:
+            out.append(_precompute_element_attrs(item, precompute_context))
         else:
             out.append(item)
         return
 
     if isinstance(item, ComponentNode):
-        # The component tag itself never folds (each render makes a fresh
+        # The component tag itself never precomputes (each render makes a fresh
         # child), but its body does: fill bodies and the implicit default
         # slot body render against THIS component's variables (the fill
-        # writer's scope), so const expressions inside them fold like any
+        # writer's scope), so const expressions inside them precompute like any
         # other. A fill's own data/fallback variables can never be const
         # names (the parser rejects reusing an outer variable's name), so
         # expressions using them stay live.
-        folded = _fold_into(item.body, const_names, fold_context, fold_attrs=fold_attrs)
-        if _body_changed(item.body, folded):
+        precomputed = _precompute_into(item.body, const_names, precompute_context, precompute_attrs=precompute_attrs)
+        if _body_changed(item.body, precomputed):
             item = ComponentNode(
-                item.source, item.position, item.attrs, folded, item.used_vars, item.name, item.contains_fills
+                item.source, item.position, item.attrs, precomputed, item.used_vars, item.name, item.contains_fills
             )
         out.append(item)
         return
@@ -569,45 +602,49 @@ def _fold_item(
     if isinstance(item, (FillNode, SlotNode)):
         # Same reasoning: the node stays (which fill a slot renders is
         # per-render state), but a fill's body and a slot's fallback body
-        # render against this component's variables, so their insides fold.
-        folded = _fold_into(item.body, const_names, fold_context, fold_attrs=fold_attrs)
-        if _body_changed(item.body, folded):
-            item = type(item)(item.source, item.position, item.attrs, folded, item.used_vars, item.introduced_vars)
+        # render against this component's variables, so their insides precompute.
+        precomputed = _precompute_into(item.body, const_names, precompute_context, precompute_attrs=precompute_attrs)
+        if _body_changed(item.body, precomputed):
+            item = type(item)(
+                item.source, item.position, item.attrs, precomputed, item.used_vars, item.introduced_vars
+            )
         out.append(item)
         return
 
     if isinstance(item, IfNode):
         if _conds_are_const(item, const_names):
             try:
-                branch_body = item.active_branch_body(fold_context)
-            except Exception:  # noqa: BLE001, S110 (deliberate: defer the error to render, see fold_body)
+                branch_body = item.active_branch_body(precompute_context)
+            except Exception:  # noqa: BLE001, S110 (deliberate: defer the error to render, see precompute_const_parts)
                 pass
             else:
                 # The same branch wins on every render that shares this cache
-                # entry: keep only the matching branch's content (folded),
+                # entry: keep only the matching branch's content (precomputed),
                 # drop the rest. None means no branch matched, so nothing
                 # remains at all.
                 if branch_body is not None:
                     for child in branch_body:
-                        _fold_item(child, const_names, fold_context, out, fold_attrs=fold_attrs)
+                        _precompute_item(
+                            child, const_names, precompute_context, out, precompute_attrs=precompute_attrs
+                        )
                 return
-        # Dynamic (or failing) conditions: keep the node, fold inside the
+        # Dynamic (or failing) conditions: keep the node, precompute inside the
         # branch bodies.
-        out.append(_fold_branch_bodies(item, const_names, fold_context, fold_attrs=fold_attrs))
+        out.append(_precompute_branch_bodies(item, const_names, precompute_context, precompute_attrs=precompute_attrs))
         return
 
     if isinstance(item, ForNode):
-        unrolled = _try_unroll_for(item, const_names, fold_context, fold_attrs=fold_attrs)
+        unrolled = _try_unroll_for(item, const_names, precompute_context, precompute_attrs=precompute_attrs)
         if unrolled is not None:
             out.extend(unrolled)
             return
-        out.append(_fold_branch_bodies(item, const_names, fold_context, fold_attrs=fold_attrs))
+        out.append(_precompute_branch_bodies(item, const_names, precompute_context, precompute_attrs=precompute_attrs))
         return
 
     out.append(item)
 
 
-def _fold_expr(node: ExprNode, fold_context: CitryContext) -> BodyItem:
+def _precompute_expr(node: ExprNode, precompute_context: CitryContext) -> BodyItem:
     """
     Evaluate an all-const expression; replace it with text when possible.
 
@@ -618,39 +655,39 @@ def _fold_expr(node: ExprNode, fold_context: CitryContext) -> BodyItem:
     (it produces render ids and collected dependencies), so the node is kept
     and renders normally. A failing evaluation also keeps the node, so the
     error surfaces at render time through the normal path (see
-    ``fold_body``).
+    ``precompute_const_parts``).
     """
-    # Imported lazily to break the import cycle; see the NOTE above fold_body.
+    # Imported lazily to break the import cycle; see the NOTE above precompute_const_parts.
     from citry.citry_render import CitryRender  # noqa: PLC0415
 
     try:
         # Unwrap a Const marker so the identity check sees the real value, the
         # same rule as ``_render_value``.
-        value = const_value(node.evaluate(fold_context.variables, sandboxed=fold_context.sandboxed))
+        value = const_value(node.evaluate(precompute_context.variables, sandboxed=precompute_context.sandboxed))
         if value is None:
             return ""
         if isinstance(value, (Slot, CitryElement, CitryRender)):
             return node
         return str(escape(value))
-    except Exception:  # noqa: BLE001 (deliberate: defer the error to render, see fold_body)
+    except Exception:  # noqa: BLE001 (deliberate: defer the error to render, see precompute_const_parts)
         return node
 
 
-def _fold_element_attrs(node: ElementAttrsNode, fold_context: CitryContext) -> BodyItem:
+def _precompute_element_attrs(node: ElementAttrsNode, precompute_context: CitryContext) -> BodyItem:
     """
     Render an all-const attribute region once; replace it with text when possible.
 
-    Mirrors ``_fold_expr``: the region renders to the same string on every
+    Mirrors ``_precompute_expr``: the region renders to the same string on every
     render that shares the cache entry, so it is safe to bake in. A region
     holding a nested-template attribute value renders to a ``CitryRender``
     (fresh parts each render), so the node is kept; a failing resolve also
     keeps the node, so the error surfaces at render time through the normal
     path. The ``on_attrs_resolved`` hook is not a concern here: the caller
-    only folds these regions when no installed extension implements it.
+    only precomputes these regions when no installed extension implements it.
     """
     try:
-        rendered = node.render(fold_context)
-    except Exception:  # noqa: BLE001 (deliberate: defer the error to render, see fold_body)
+        rendered = node.render(precompute_context)
+    except Exception:  # noqa: BLE001 (deliberate: defer the error to render, see precompute_const_parts)
         return node
     if isinstance(rendered, str):
         return str(rendered)
@@ -658,22 +695,22 @@ def _fold_element_attrs(node: ElementAttrsNode, fold_context: CitryContext) -> B
 
 
 def _body_changed(old: list[BodyItem], new: list[BodyItem]) -> bool:
-    """True when folding produced a different body list (so the node must be rebuilt)."""
+    """True when precomputing produced a different body list (so the node must be rebuilt)."""
     return len(new) != len(old) or any(n is not o for n, o in zip(new, old, strict=True))
 
 
-def _fold_branch_bodies(
+def _precompute_branch_bodies(
     node: IfNode | ForNode,
     const_names: frozenset[str],
-    fold_context: CitryContext,
+    precompute_context: CitryContext,
     *,
-    fold_attrs: bool,
+    precompute_attrs: bool,
 ) -> BodyItem:
     """
-    Fold inside a kept ``IfNode``/``ForNode``: same node, folded branch bodies.
+    Precompute inside a kept ``IfNode``/``ForNode``: same node, precomputed branch bodies.
 
     Each branch is the compiler's ``(position, attrs, body, introduced_vars)``
-    tuple; the body list is folded against the same const variables. For a
+    tuple; the body list is precomputed against the same const variables. For a
     loop this is safe because a const expression that does not use the loop
     variables produces the same text on every iteration, and a loop variable
     can never share a name with a const one (the parser rejects a loop
@@ -686,10 +723,10 @@ def _fold_branch_bodies(
     changed = False
     for branch in node.branches:
         body: list[BodyItem] = branch[2]
-        folded = _fold_into(body, const_names, fold_context, fold_attrs=fold_attrs)
-        if _body_changed(body, folded):
+        precomputed = _precompute_into(body, const_names, precompute_context, precompute_attrs=precompute_attrs)
+        if _body_changed(body, precomputed):
             changed = True
-            new_branches.append((branch[0], branch[1], folded, branch[3]))
+            new_branches.append((branch[0], branch[1], precomputed, branch[3]))
         else:
             new_branches.append(branch)
     if not changed:
@@ -700,15 +737,15 @@ def _fold_branch_bodies(
 def _try_unroll_for(
     node: ForNode,
     const_names: frozenset[str],
-    fold_context: CitryContext,
+    precompute_context: CitryContext,
     *,
-    fold_attrs: bool,
+    precompute_attrs: bool,
 ) -> list[BodyItem] | None:
     """
     Run an all-const loop once, ahead of time; return its text, or ``None``.
 
     Requirements, checked before touching the iterable: the loop's ``each``
-    clause uses only const variables, and every branch body looks foldable
+    clause uses only const variables, and every branch body looks precomputable
     from its shape alone, with the loop variables counted as const (only
     text, expressions, and ``<c-if>`` chains whose variables all fit). A
     component, slot, or unknown node disqualifies the loop: pre-computing
@@ -716,12 +753,12 @@ def _try_unroll_for(
     would all lose their own iteration's loop-variable values.
 
     The loop then runs once here, through the node's own ``iter_bodies`` (the
-    same evaluation a render uses), folding each iteration's body with that
+    same evaluation a render uses), precomputing each iteration's body with that
     iteration's loop-variable values. Gives up (returns ``None``) when an
     iteration produces anything but text, when evaluation fails, or past
     ``_MAX_UNROLL_ITERATIONS`` iterations.
     """
-    # Imported lazily to break the import cycle; see the NOTE above fold_body.
+    # Imported lazily to break the import cycle; see the NOTE above precompute_const_parts.
     from citry.nodes import _find_attr  # noqa: PLC0415
 
     loop_branch = node.branches[0]
@@ -732,38 +769,41 @@ def _try_unroll_for(
         return None
 
     inner_names = const_names | set(targets)
-    if not all(_statically_foldable(branch[2], inner_names, fold_attrs=fold_attrs) for branch in node.branches):
+    if not all(
+        _statically_precomputable(branch[2], inner_names, precompute_attrs=precompute_attrs)
+        for branch in node.branches
+    ):
         return None
 
     parts: list[BodyItem] = []
     try:
-        for count, (body, body_context) in enumerate(node.iter_bodies(fold_context), start=1):
+        for count, (body, body_context) in enumerate(node.iter_bodies(precompute_context), start=1):
             if count > _MAX_UNROLL_ITERATIONS:
                 return None
-            folded = _fold_into(body, inner_names, body_context, fold_attrs=fold_attrs)
-            if not all(isinstance(part, str) for part in folded):
+            precomputed = _precompute_into(body, inner_names, body_context, precompute_attrs=precompute_attrs)
+            if not all(isinstance(part, str) for part in precomputed):
                 # A value turned out to need per-render rendering (a Slot or
                 # element in a const variable); the static check cannot see
                 # values, so this is found here.
                 return None
-            parts.extend(folded)
-    except Exception:  # noqa: BLE001 (deliberate: defer the error to render, see fold_body)
+            parts.extend(precomputed)
+    except Exception:  # noqa: BLE001 (deliberate: defer the error to render, see precompute_const_parts)
         return None
     return parts
 
 
-def _statically_foldable(body: list[BodyItem], names: frozenset[str], *, fold_attrs: bool) -> bool:
+def _statically_precomputable(body: list[BodyItem], names: frozenset[str], *, precompute_attrs: bool) -> bool:
     """
-    True when every item in ``body`` can fold to text given const ``names``.
+    True when every item in ``body`` can precompute to text given const ``names``.
 
     A shape check only (no evaluation): text always fits; an expression or an
     attribute region fits when its variables fit (and, for attribute regions,
-    when folding them is allowed at all); an ``<c-if>`` fits when its
+    when precomputing them is allowed at all); an ``<c-if>`` fits when its
     conditions and every branch body fit. Any other node kind (component,
-    slot, fill, nested template, extension-injected) does not fold to text,
+    slot, fill, nested template, extension-injected) does not precompute to text,
     so the body fails.
     """
-    # Imported lazily to break the import cycle; see the NOTE above fold_body.
+    # Imported lazily to break the import cycle; see the NOTE above precompute_const_parts.
     from citry.nodes import ElementAttrsNode, ExprNode, IfNode  # noqa: PLC0415
 
     for item in body:
@@ -771,12 +811,15 @@ def _statically_foldable(body: list[BodyItem], names: frozenset[str], *, fold_at
             continue
         if isinstance(item, ExprNode) and set(item.used_vars) <= names:
             continue
-        if fold_attrs and isinstance(item, ElementAttrsNode) and set(item.used_vars) <= names:
+        if precompute_attrs and isinstance(item, ElementAttrsNode) and set(item.used_vars) <= names:
             continue
         if (
             isinstance(item, IfNode)
             and _conds_are_const(item, names)
-            and all(_statically_foldable(branch[2], names, fold_attrs=fold_attrs) for branch in item.branches)
+            and all(
+                _statically_precomputable(branch[2], names, precompute_attrs=precompute_attrs)
+                for branch in item.branches
+            )
         ):
             continue
         return False
@@ -793,7 +836,7 @@ def _conds_are_const(node: IfNode, const_names: frozenset[str]) -> bool:
     extension) counts as non-const, to be safe. The ``c-else`` branch has no
     condition and rules out nothing.
     """
-    # Imported lazily to break the import cycle; see the NOTE above fold_body.
+    # Imported lazily to break the import cycle; see the NOTE above precompute_const_parts.
     from citry.nodes import _find_attr  # noqa: PLC0415
 
     for branch in node.branches:

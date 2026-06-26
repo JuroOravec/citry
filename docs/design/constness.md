@@ -5,7 +5,7 @@ the feature is: mark a component input as "this never changes between
 renders" (`Const(value)`), and the engine computes the parts of the template
 that depend only on such inputs once, caches the result, and reuses it on
 every later render with the same values. That pre-computing step is called
-**folding** throughout this doc and the code.
+**precomputing** throughout this doc and the code.
 
 What exists (all in `citry/constness.py`):
 
@@ -21,13 +21,13 @@ What exists (all in `citry/constness.py`):
   class per combination of const values, scoped to the `Citry` instance,
   capped in size (the least recently used entry drops first), guarded by a
   lock.
-- Folding itself (`fold_body`): const expressions become escaped text; a
+- Precomputing itself (`precompute_const_parts`): const expressions become escaped text; a
   const `<c-if>` keeps only its winning branch; an `<c-if>`/`<c-for>` that
-  must stay still gets its insides folded; an all-const `<c-for>` runs once
-  and its text is baked in (capped); slot content folds inside (fill bodies,
+  must stay still gets its insides precomputed; an all-const `<c-for>` runs once
+  and its text is baked in (capped); slot content precomputes inside (fill bodies,
   default-slot bodies, slot fallbacks render against the writer's variables,
-  so const expressions in them fold even though the slot machinery itself
-  stays per-render); neighboring static strings join. Folding never raises:
+  so const expressions in them precompute even though the slot machinery itself
+  stays per-render); neighboring static strings join. Precomputing never raises:
   anything that fails just stays un-optimized and errors (if any) surface at
   render, as they would have anyway.
 - Values written literally in the template (`age="30"`, `c-age="30"`) are
@@ -38,8 +38,8 @@ What exists (all in `citry/constness.py`):
   value then safely renders without the optimization).
 
 Sections 3-5 and 7-9 describe what is built; measured results are in
-section 13. What is NOT built: folding across the slot boundary (a constant
-fill folding the child's `<c-slot>` away) was designed, falsified, and
+section 13. What is NOT built: precomputing across the slot boundary (a constant
+fill precomputing the child's `<c-slot>` away) was designed, falsified, and
 parked, see section 14; the component-boundary placeholder (section 5.1)
 stays parked (low value for now, the child takes its own cache hit since
 the marker flows down); phase-2 taint (section 4.1) stays parked.
@@ -77,7 +77,7 @@ MyCard(title="hi", cols=Const(3))
 `Const(x)` is a promise: "this input does not change between renders of this
 usage." The engine uses that promise to do work once instead of on every
 render. Concretely, any part of the template whose value depends only on
-const inputs is computed on the first render, folded into the body, and reused
+const inputs is computed on the first render, precomputed into the body, and reused
 on later renders. The non-const parts are re-evaluated every render as usual.
 
 From the user's side nothing changes: they call `MyCard(title=Const("hi"))`
@@ -94,7 +94,7 @@ This is the Citry form of django-components #1083.
 - Some inputs are marked `Const`; the rest are dynamic.
 - The optimized body for a given const signature is built once and cached.
 - On every render, the dynamic inputs are applied fresh; the const parts are
-  already folded.
+  already precomputed.
 
 The cache is a memoization keyed by "which inputs are const, and to what
 values," scoped so it can be cleared and bounded.
@@ -114,7 +114,7 @@ Three layers, from most-shared to least:
    Calling it yields a fresh, unoptimized node list.
 2. **Const cache: the optimized body.** Keyed by `(component class, const
    signature)`. The value is a specialized node list where all-const nodes
-   have been folded and dead control-flow branches pruned. Scoped to the
+   have been precomputed and dead control-flow branches pruned. Scoped to the
    `Citry` instance and bounded (see 7.2).
 3. **Per render: dynamic evaluation.** The non-const nodes in the optimized
    body evaluate against the live context each render.
@@ -146,13 +146,13 @@ render; there is no per-element or per-signature body cache yet.)
   evaluate it and replace it in the list with its result (text or a child
   element, see section 5). Prune dead branches. Store the specialized list in
   the const cache.
-- **Cache hit:** render the already-folded list directly; do not re-fold.
+- **Cache hit:** render the already-precomputed list directly; do not re-precompute.
 
 ---
 
 ## 4. The `template_data` boundary (the crux)
 
-This is the part that decides whether partial-const folding is sound.
+This is the part that decides whether partial-const precomputing is sound.
 
 The body does not consume kwargs; it consumes the **template variables**
 returned by `template_data(kwargs, slots)`. Citry's base `template_data`
@@ -165,7 +165,7 @@ def template_data(self, kwargs, slots):
     return {"label": fetch_from_db(kwargs.title)}   # title const, label NOT const
 ```
 
-To fold a node you must know its used template variables are const, which
+To precompute a node you must know its used template variables are const, which
 means relating const kwargs to const template variables through
 `template_data`. There is no general static answer (it is arbitrary Python).
 
@@ -246,7 +246,7 @@ The proxy splits into two phases of very different difficulty:
   wrapped at compose, passed down the tree, and detected as const. A value
   passed through unchanged (`template_data` returns `kwargs.title` directly)
   stays const; a value that is transformed loses the marker. This alone
-  enables folding for the common pass-through case, and can land long before
+  enables precomputing for the common pass-through case, and can land long before
   phase 2.
 - **Phase 2 (hard): taint propagation.** `Const("title").upper()` should stay
   `Const(str)`: an operation over const operands yields a const result, while
@@ -275,13 +275,13 @@ no render is ever literally "all inputs const."
 The correct criterion is therefore **"the template (or a node) uses only const
 variables,"** evaluated per node against the variables that node actually uses,
 not "all inputs are const." A node that touches `self` (or any non-const var)
-is not foldable; a node that touches only const vars is.
+is not precomputable; a node that touches only const vars is.
 
 ---
 
-## 5. The folded body is heterogeneous
+## 5. The precomputed body is heterogeneous
 
-Folding does not collapse a subtree to a single string. A folded body is a
+Precomputing does not collapse a subtree to a single string. A precomputed body is a
 list whose items are one of:
 
 - `str`: static text, passes through unchanged.
@@ -291,7 +291,7 @@ list whose items are one of:
 - a dynamic node: a non-const node that re-evaluates against the live context
   each render.
 
-### 5.1 Why a component boundary cannot fold to text
+### 5.1 Why a component boundary cannot precompute to text
 
 A nested `<c-Inner>` with const inputs still cannot become frozen text,
 because every time the outer component renders:
@@ -300,8 +300,8 @@ because every time the outer component renders:
   yields two identities, per #1650), and
 - `Inner`'s JS/CSS must be (re)registered for this render.
 
-So folding a component boundary yields a placeholder that has done the expensive
-work once (parse, compile, fold of `Inner`'s body) but still re-emits cheaply
+So precomputing a component boundary yields a placeholder that has done the expensive
+work once (parse, compile, precompute of `Inner`'s body) but still re-emits cheaply
 with a fresh ID and re-merges assets on each render. The per-render output of
 that placeholder is a `CitryRender` (see section 6).
 
@@ -319,9 +319,9 @@ Two distinct structs sit on either side of `.render()` (full design in
   carrying the rendered parts plus collected metadata (JS/CSS deps).
   `CitryRender.serialize()` produces the HTML string.
 
-The folded placeholders of section 5 are recipes that produce a child
+The precomputed placeholders of section 5 are recipes that produce a child
 `CitryRender` each render (fresh id, re-merged deps), which is why a component
-boundary cannot fold to frozen text.
+boundary cannot precompute to frozen text.
 
 ---
 
@@ -357,7 +357,7 @@ Caveats to design carefully (do not just call `repr`):
 - Two distinct values must not serialize to the same key.
 
 A reasonable rule: hashable then hash; else a value-based canonical form for
-plain data containers; else treat as non-const (refuse to fold) rather than
+plain data containers; else treat as non-const (refuse to precompute) rather than
 risk a wrong or unstable key.
 
 ### 7.3 Bounding and scoping
@@ -378,14 +378,14 @@ that are merely fixed within a single render.
 
 Foldability is per node and per scope.
 
-- A node is foldable iff **all** of its used variables are const in the node's
+- A node is precomputable iff **all** of its used variables are const in the node's
   scope. One non-const variable poisons the node.
 - **Scope and shadowing:** `<c-for each="x in items">` introduces `x`; inside
   the loop `x` is not const even if an outer variable of the same name is.
   `<c-fill>` introduces its data/default variables similarly. Use the AST's
   `used_variables` and `introduced_variables` to mask correctly.
 - **Control-flow pruning:** `<c-if cond="cols > 2">` with `cols` const can be
-  evaluated at fold time and the dead branch dropped (a large part of the
+  evaluated at precompute time and the dead branch dropped (a large part of the
   win). With `cols` non-const, keep both branches.
 
 The inputs to this analysis (`used_variables`, `introduced_variables`) are
@@ -395,16 +395,16 @@ already tracked in the AST.
 
 ## 9. Invariants
 
-- **Per-render state is never folded.** The render ID, component id, and any
+- **Per-render state is never precomputed.** The render ID, component id, and any
   scoped CSS/JS hashes derived from it must be injected fresh on every render,
   never baked into the cached body. This is the same reason #1650 caches the
   element rather than the string.
 - **`Const` is a user promise, not verified.** If a user marks a value const
   and then mutates it, output goes stale. That is acceptable and must be
   documented.
-- **Folding assumes pure, deterministic expressions.** Citry expressions are
+- **Precomputing assumes pure, deterministic expressions.** Citry expressions are
   sandboxed by default (see `safe_eval`), which mostly guarantees this, but
-  folding does change when a const expression is evaluated (once, at first
+  precomputing does change when a const expression is evaluated (once, at first
   render). (Turning the sandbox off does not change this assumption: a template
   expression is still expected to be a pure function of its inputs.)
 
@@ -414,18 +414,18 @@ already tracked in the AST.
 
 - **Expression caching (#1473) is a separate concern.** That is a per-value
   memo of expression results while inputs are unchanged. It is unrelated to
-  const folding and must not be entangled with it. In particular, because
-  folded bodies are shared across elements with the same const signature but
+  const precomputing and must not be entangled with it. In particular, because
+  precomputed bodies are shared across elements with the same const signature but
   different dynamic inputs, the non-const nodes in a shared body must be
   stateless re-evaluators; any expression cache is a separate, value-keyed
   layer that only applies to truly-unshared nodes.
-- **Slot content folds inside; the slot boundary stays dynamic.** Folding
+- **Slot content precomputes inside; the slot boundary stays dynamic.** Precomputing
   descends into fill bodies, the implicit default-slot body, and slot
   fallback bodies: they render against the variables of the component whose
   template wrote them, so const expressions inside them are pre-computed
   like any other. The slot boundary itself (which fill a `<c-slot>` renders,
   the per-render fill collection) is per-render state and is excluded from
-  the cache key. Crossing that boundary, so that a constant fill folds the
+  the cache key. Crossing that boundary, so that a constant fill precomputes the
   child's `<c-slot>` away entirely, was designed, checked, and parked: see
   section 14 for the design and the reasons it lost.
 - **Template literals are implicitly const (built).** A static attribute
@@ -436,7 +436,7 @@ already tracked in the AST.
   component-input boundary only (the level where const-ness is consumed, see
   section 11), so values that become engine identifiers elsewhere (slot and
   fill names, provide keys) stay plain. This gives every static component
-  usage body-cache folding with no opt-in, and it composes: a const container
+  usage body-cache precomputing with no opt-in, and it composes: a const container
   literal can unroll a `<c-for>` in the child. Because these markers are
   engine-injected, the proxy's `repr` forwards to the wrapped value, so a
   marked value inside a container reprs identically to the plain one.
@@ -453,7 +453,7 @@ already tracked in the AST.
   unsound. Instead a default is made const the same way any value is, by
   marking it: `cols: int = Const(3)` on the typed `Kwargs`. The dataclass
   stores the marker as-is, so an omitted kwarg flows the marked default
-  through `template_data` and folds, while a passed kwarg renders with the
+  through `template_data` and precomputes, while a passed kwarg renders with the
   caller's (marked or unmarked) value.
 - **Typing ergonomics (resolved).** `title=Const("hi")` type-checks against
   `title: str`: to checkers, `Const` is `def Const(x: T) -> T` (transparent
@@ -462,7 +462,7 @@ already tracked in the AST.
   and mypy does not honor a `__new__` returning a bare TypeVar.
   `is_const`/`const_value` are the sanctioned detection points.
 - **Thread-safety.** The shared cache is read and written during render;
-  concurrent renders need a lock or a concurrent map. First-render folding
+  concurrent renders need a lock or a concurrent map. First-render precomputing
   under a lock.
 - **Hot reload / invalidation.** If a template changes (hot reload) the cached
   optimized bodies are stale. Invalidate on class redefinition and on
@@ -482,7 +482,7 @@ already tracked in the AST.
   the **inner** component can take a cache hit on `value`. So const-ness is
   consumed at the level where a value becomes a component input, not at the
   container level.
-- Fold-time errors: if a const node raises while folding, does the error
+- Precompute-time errors: if a const node raises while precomputing, does the error
   surface at compose or at render? Prefer render semantics.
 - How does `Const` survive (or not) through `template_data`? Phase 1 carries it
   only through pass-through; phase 2 (taint) carries it through transforms (see
@@ -502,7 +502,7 @@ already tracked in the AST.
    already covers pass-through const variables.
 2. The const-keyed, `Citry`-scoped, bounded body cache, keyed on the const
    context variables and values (sections 3, 7).
-3. A `fold(body, const_vars, scope)` pass over the existing node list using
+3. A `precompute(body, const_vars, scope)` pass over the existing node list using
    `used_variables` / `introduced_variables`, with `c-if` branch pruning
    (section 8), producing the heterogeneous body of section 5.
 4. The child-element struct (a `CitryElement`) that re-emits with a fresh
@@ -522,7 +522,7 @@ Measured on an M-series Mac, CPython 3.13, **release** build of the Rust
 extension (`maturin develop --release`; the default debug build skews any
 benchmark that touches `transform_html` by ~12x). Each case compares the
 same component called with `Const(...)`-marked inputs vs plain inputs, after
-warmup (cache hits, not first-render folding). The scenarios are
+warmup (cache hits, not first-render precomputing). The scenarios are
 reproducible:
 
 ```bash
@@ -534,8 +534,8 @@ reproducible:
 |---|---|---|
 | Expression-heavy (35 const exprs, 5 const ifs, 1 dynamic expr) | **2.38x** (27.5 -> 11.6 us) | **1.98x** (36.1 -> 18.3 us) |
 | Small card (4 const exprs, 1 const if, 1 dynamic expr) | **1.48x** (8.7 -> 5.9 us) | **1.37x** (11.6 -> 8.5 us) |
-| Nav with const 20-link loop, fold v2 unroll (1 dynamic expr) | - | **2.83x** (44.1 -> 15.5 us) |
-| Slot-heavy layout (layout + card, 4 slot sites, const fills folding inside) | **1.56x** (47.5 -> 30.5 us) | **1.64x** (68.8 -> 42.0 us) |
+| Nav with const 20-link loop, precompute v2 unroll (1 dynamic expr) | - | **2.83x** (44.1 -> 15.5 us) |
+| Slot-heavy layout (layout + card, 4 slot sites, const fills precomputing inside) | **1.56x** (47.5 -> 30.5 us) | **1.64x** (68.8 -> 42.0 us) |
 
 The render-phase number matches the ~50% upstream claim (django-components
 #1083). Two findings from profiling:
@@ -543,24 +543,24 @@ The render-phase number matches the ~50% upstream claim (django-components
 - Per-render signature freezing grows with the number of const variables; the
   frozen key is therefore memoized on the `Const` proxy itself (sound because
   `Const` is a promise the value does not change). Without the memo, 35
-  markers ate roughly half the folding win.
-- After folding, serialization (the marker pass) was the largest single
+  markers ate roughly half the precomputing win.
+- After precomputing, serialization (the marker pass) was the largest single
   remaining cost, ~37% of end-to-end; addressed in
   [#7](https://github.com/JuroOravec/citry/issues/7) by `mark_html`, a
   single-pass root scan in `citry_html_transform`.
 
 ---
 
-## 14. Const slots: folding across the slot boundary (considered, parked)
+## 14. Const slots: precomputing across the slot boundary (considered, parked)
 
 **Verdict (2026-06-11): parked.** The falsifier checks in 14.5 were carried
 out and the design lost on all three counts; the measured results are
 recorded there. The deciding argument is behavioral, not just numbers:
-folding away `<c-slot>` tags makes core slot machinery (fill invocation,
+precomputing away `<c-slot>` tags makes core slot machinery (fill invocation,
 the `on_slot_rendered` hook) conditional on an optimization, and an
 extension implementing that hook (likely, possibly a built-in) would
 disable the feature wholesale anyway. What slot-heavy pages actually
-needed, folding INSIDE slot content, is built and unaffected (14.1).
+needed, precomputing INSIDE slot content, is built and unaffected (14.1).
 The design below is kept as the record of what was considered and why it
 was rejected.
 
@@ -571,19 +571,19 @@ it misses most of such a page. This section designs the crossing.
 
 ### 14.1 What is already built
 
-Folding descends INTO slot content (fill bodies, the implicit default-slot
+Precomputing descends INTO slot content (fill bodies, the implicit default-slot
 body, slot fallback bodies), because that content renders against the
 variables of the component whose template wrote it, and those are fixed per
 cache entry. So a fill like `<c-fill name="title">{{ heading }}</c-fill>`
-with `heading` const already folds to plain text inside the parent's cached
+with `heading` const already precomputes to plain text inside the parent's cached
 body. What does NOT yet happen: the child component still renders its
 `<c-slot name="title">` dynamically on every render, looking up and
 invoking the fill, even though the fill's output is a fixed string.
 
-### 14.2 The key insight: a const slot is a fill that folded to pure text
+### 14.2 The key insight: a const slot is a fill that precomputed to pure text
 
 There is no need for separate "is this slot const" reasoning (tracking the
-fill's used variables, for example): after the parent's body is folded, a
+fill's used variables, for example): after the parent's body is precomputed, a
 constant fill is simply one whose body list contains nothing but strings.
 That test is more precise than any static analysis (it benefits from
 `<c-if>` pruning inside the fill) and the constant VALUE (the text) falls
@@ -593,7 +593,7 @@ child mints fresh render ids every render.
 ### 14.3 Design
 
 1. **Detect at fill collection.** When `ComponentNode` collects fills, a
-   fill whose (already-folded) body is all strings produces a `Slot` tagged
+   fill whose (already-precomputed) body is all strings produces a `Slot` tagged
    with its constant text (e.g. a `const_text: str | None` field). The same
    tag applies to plain-string fills from the Python API
    (`slots={"title": "Hello"}`): a string fill is inherently constant, the
@@ -604,18 +604,18 @@ child mints fresh render ids every render.
    records, for each declared slot: the constant text when the fill is
    const, an explicit ABSENT marker when no fill was given, and NOTHING when
    the fill is dynamic.
-3. **Why absent and dynamic must be distinct keys.** Folding the fallback
+3. **Why absent and dynamic must be distinct keys.** Precomputing the fallback
    body into place is only sound for renders that have NO fill for that
    slot. If "absent" and "dynamic fill" shared a cache entry, a render that
    passes a dynamic fill would be served the baked fallback. With distinct
-   keys, the ABSENT entry can inline the (already folded) fallback, and
+   keys, the ABSENT entry can inline the (already precomputed) fallback, and
    dynamic-fill renders keep a live `<c-slot>`.
-4. **Fold the child's `<c-slot>`.** During the child's fold, a slot node
+4. **Precompute the child's `<c-slot>`.** During the child's precompute, a slot node
    whose name is static and maps to a const-text entry is replaced by that
-   text; one that maps to ABSENT is replaced by its folded fallback body.
-   Slots with dynamic names (`c-name`) never fold.
+   text; one that maps to ABSENT is replaced by its precomputed fallback body.
+   Slots with dynamic names (`c-name`) never precompute.
 5. **Hook gate.** `on_slot_rendered` fires once per slot render today;
-   folding the slot away would skip it. Only fold slot nodes when no
+   precomputing the slot away would skip it. Only precompute slot nodes when no
    registered extension implements `on_slot_rendered` (the extension
    manager knows). This keeps the extension contract intact at the cost of
    the optimization, which is the right default.
@@ -631,7 +631,7 @@ component-boundary placeholder's territory (section 5.1, still parked).
 
 - **Expose `used_vars` on `Slot` and reason from them.** Subsumed by 14.2:
   template fills already carry parser-computed used variables internally,
-  but "try folding and check the result" is strictly more precise, and for
+  but "try precomputing and check the result" is strictly more precise, and for
   Python-API slots there is no template scope for `used_vars` to refer to.
 - **A generic `Const(slot)` wrapper as the user API.** Works as a promise
   for values whose output can be keyed (strings, which are auto-marked
@@ -651,15 +651,15 @@ component-boundary placeholder's territory (section 5.1, still parked).
   title, dynamic body; reproducible with
   `packages/py/citry/tests/benchmark_const.py --profile`).
   `SlotNode` rendering was 32.7% of render time, but
-  only two of the four slots would fold, so the realistic ceiling was
+  only two of the four slots would precompute, so the realistic ceiling was
   roughly 10-16%. Fill collection (~12%) is paid regardless: fills must be
   collected as long as any slot stays dynamic. The remaining per-render
   costs (instances, queue, serialize) are the component-boundary
   placeholder's territory, not this design's.
 - **Low hit rate in real templates.** Worse than the raw rate suggests: the
-  slots that CAN fold are systematically the cheap ones (titles, labels,
+  slots that CAN precompute are systematically the cheap ones (titles, labels,
   short static fills), while the expensive slots (main/body content) are
-  exactly the ones that contain components and can never fold. The win
+  exactly the ones that contain components and can never precompute. The win
   concentrates where there is least to win.
 - **`on_slot_rendered` becomes ubiquitous.** Confirmed as likely: a built-in
   extension (the dependency extension is the natural candidate) is expected
@@ -677,13 +677,13 @@ component-boundary placeholder's territory (section 5.1, still parked).
 - A child using the same slot name in several `<c-slot>` tags bakes the
   text in each place; that is correct and needs no special handling.
 
-## 15. Folding more: deep-const, Computed, and expression propagation
+## 15. Precomputing more: deep-const, Computed, and expression propagation
 
 Evaluating expressions is about 8% of a repeat render, and working out element
-attributes about 10% (the large benchmark). Folding already removes some of that
+attributes about 10% (the large benchmark). Precomputing already removes some of that
 for all-constant expressions (sections 3-4), but on a real page it barely moves
 render time, because most of a page loops over data that changes every render
-(see [benchmarking.md](benchmarking.md)). Three ideas were explored to fold more.
+(see [benchmarking.md](benchmarking.md)). Three ideas were explored to precompute more.
 
 They all run into one wall, the same one section 4.1 calls "a value that is
 transformed loses the marker":
@@ -775,7 +775,7 @@ This is the third idea, and the one that shipped, because it is the most surgica
 a focused change at the kwarg marking gate, no new types, no access tracking.
 
 **The gap it closes.** The *body* half was already done: an `{{ expr }}` (or
-attribute region) whose variables are all const already folds to text (4.2). The
+attribute region) whose variables are all const already precomputes to text (4.2). The
 new piece is the *child-kwarg* half. A child kwarg is marked at a separate place
 (`ComponentNode._resolve_kwargs`), which used to mark `Const` only when the
 expression read no variables. So `c-x="a + 3"` with `a` const was resolved live,
@@ -802,21 +802,21 @@ output compared byte-for-byte; A/B against the old no-variable-only rule):
 What the numbers settle:
 
 - **Correct everywhere.** Output is byte-identical on every shape: `Const` is
-  transparent, so propagating it changes only what folds, not what renders.
+  transparent, so propagating it changes only what precomputes, not what renders.
 - **Zero on the common case.** A data-heavy page gets no eval reduction (its child
   kwargs are per-render data) and pays only a tiny cost: one `is_const` lookup per
   variable of each expression attribute. On the benchmark that is within noise.
 - **A real but conditional win on config-heavy pages, because it trades
   expression-eval for cache-key work.** When a child is fed kwargs computed
   entirely from constant inputs, those kwargs now propagate `Const`, the child
-  folds its body on them, and many identical children collapse onto one cache
+  precomputes its body on them, and many identical children collapse onto one cache
   entry. The eval count drops 33-75%. But each child now pays to *freeze* its const
   kwargs into a cache key, so the wall-clock only improves when the eval work saved
   outweighs that freeze cost: the rich child speeds up, the lean child slows down.
   This is the same trade const already makes for literal const kwargs; expression
   propagation just extends it to computed ones.
 
-So it is worth keeping for what it unlocks (automatic fold reuse for design-system
+So it is worth keeping for what it unlocks (automatic precompute reuse for design-system
 and app-shell components whose children derive from a constant theme), with the
 honest caveat that it is not a free win and does **not** move the data-heavy
 benchmark.
@@ -824,7 +824,7 @@ benchmark.
 **Correctness** (four adversarial passes, each with a runnable reproducer; no new
 wrong output or crash):
 
-- It does **not** inherit the body fold's staleness. The body fold bakes an
+- It does **not** inherit the body precompute's staleness. The body precompute bakes an
   all-const `{{ expr }}` once, so an *impure* const expression in a body goes stale
   (`"1"`, `"1"`, `"1"`). Expression propagation recomputes the expression live in
   `_resolve_kwargs` every render and wraps only the fresh result, so its output is
@@ -840,10 +840,10 @@ wrong output or crash):
 
 ### 15.4 If you pick the unbuilt ideas up again
 
-The honest test for deep const and `Computed` is narrow: *do they fold a meaningful
+The honest test for deep const and `Computed` is narrow: *do they precompute a meaningful
 fraction of a config-heavy component's body, even though they do nothing for a
 data-heavy one?* Two cheap instruments answer it without fighting timing noise:
-count how many `fold_body` nodes become foldable with vs without the feature, and
+count how many `precompute_const_parts` nodes become precomputable with vs without the feature, and
 count `safe_eval` evaluations per render; then confirm with a config-heavy
 microbenchmark (a nav whose body is a literal item list and whose classes derive
 from a `Const(theme)` outside any loop). Build `Computed` only if those numbers

@@ -468,7 +468,7 @@ per-render input, not a constant) and did nothing: a `Const` container yields
 non-`Const` elements when iterated and a `Const` dict yields non-`Const`
 values when indexed, so a blanket mark never reaches the loop bodies that do
 the rendering work. The honest result is that even a correct, hand-placed
-`Const` pass folds almost nothing on this page, because a real project page is
+`Const` pass precomputes almost nothing on this page, because a real project page is
 mostly loops over dynamic data (see the section 11 log). The small scenario
 has no const variant at all: its single Button computes everything it renders
 from its inputs, so it has no render-invariant literal to mark.
@@ -614,8 +614,8 @@ Phases 1-2 gave the first citry-vs-DJC-vs-Django numbers. Phase 3's gates
   dated results table.
 - **How far does `Const` reach in the large scenario** (resolved): the
   `citry-const` file now marks `Const` on each component's render-invariant
-  literals, the most a careful user could do by hand. It still folds almost
-  nothing (the fold cache grows by one entry over the auto-marked baseline)
+  literals, the most a careful user could do by hand. It still precomputes almost
+  nothing (the precompute cache grows by one entry over the auto-marked baseline)
   and does not move the render time, because the page is loop-dominated and
   `Const` does not survive iteration or indexing into the per-render data
   (section 11 log, section 6.4). Closing that gap is a `constness.md` design
@@ -675,8 +675,8 @@ Reading:
   machinery itself (per-render component construction, slot resolution, id
   marking).
 - `citry-const` shows no benefit on this scenario: the Button template is a
-  single element, so almost nothing is left to fold, while computing the
-  fold-cache key still costs a little per render. Expected, not a bug; the
+  single element, so almost nothing is left to precompute, while computing the
+  precompute-cache key still costs a little per render. Expected, not a bug; the
   optimization targets templates with large constant regions, so the large
   scenario (phase 3) is its fair test.
 
@@ -768,16 +768,16 @@ progress entry above:
 - **Const variant reworked from a blanket flag to per-component literals.**
   The first cut wrapped the whole input tree in `Const` via a single
   runner-flipped flag. That was wrong twice over: it falsely promised the
-  per-render project data was constant, and it folded nothing, because a
+  per-render project data was constant, and it precomputed nothing, because a
   `Const` container yields non-`Const` elements when iterated and a `Const`
   dict yields non-`Const` values when indexed, so the marker never reached the
   loop bodies. The variant is now a separate file
   (`test_benchmark_citry_const.py`) where each `template_data()` marks `Const`
   only its render-invariant literals (literal attribute dicts, the theme, icon
-  paths). This is the correct usage, and it still grows the fold cache by one
+  paths). This is the correct usage, and it still grows the precompute cache by one
   entry (50 to 51) and leaves render time unchanged: those literals are
   consumed by child components that mix them with dynamic data, so they do not
-  fold either. The honest conclusion is that `Const` does not help a
+  precompute either. The honest conclusion is that `Const` does not help a
   loop-over-data page; it is built for templates with large static blocks.
   Propagating the marker through iteration/indexing is a `constness.md`
   question, separate from the benchmark.
