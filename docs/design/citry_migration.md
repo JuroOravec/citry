@@ -1006,7 +1006,7 @@ Ported function by function, on demand. Current state:
 | Feature | Status | Notes |
 |---|---|---|
 | `@djc_test` (per-test isolation of settings, registries, caches, imported modules) | ❌ Drop | citry has no test-isolation decorator: a `Citry()` instance is already the isolation unit (it owns its own registry, caches, and settings), so a test gets clean state by binding its components to a fresh instance. The two leftovers do not need one either: deterministic render ids become the `id_generator` setting, and a test that re-imports a module manages `sys.modules` itself rather than through citry API |
-| `GenIdPatcher` (deterministic render ids in tests) | ✅ Done | The autouse per-test id-counter fixture in `tests/conftest.py` |
+| `GenIdPatcher` (deterministic render ids in tests) | ✅ Done | Two pieces: the public `Citry(id_generator=...)` setting overrides the per-render id per instance (a callable, `"path.to.func"` import string, or a class built once), and the autouse per-test id-counter fixture in `tests/conftest.py` patches the built-in generator so every instance is deterministic across citry's own suite |
 | `is_testing` / `CsrfTokenPatcher` / Django settings merging | ⏭️ Skip (Django) | |
 
 </details>

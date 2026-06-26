@@ -440,9 +440,18 @@ class Component(metaclass=ComponentMeta):
         parent: Component | None = None,
         provides: dict[str, Any] | None = None,
     ) -> None:
-        self.id = id if id is not None else gen_render_id()
-
         cls = type(self)
+
+        # Render id precedence: an explicit id wins; then this instance's
+        # id_generator override (CitrySettings.id_generator); then the built-in
+        # generator. The built-in stays a module-level call so a test can swap
+        # it for every instance at once by patching gen_render_id.
+        if id is not None:
+            self.id = id
+        elif cls.citry.id_generator is not None:
+            self.id = cls.citry.id_generator()
+        else:
+            self.id = gen_render_id()
 
         # Normalize inputs to plain dicts. kwargs/slots may arrive as a dict,
         # a NamedTuple, or a dataclass (e.g. a typed `Kwargs`/`Slots`

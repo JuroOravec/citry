@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Callable, Mapping
     from pathlib import Path
 
     from citry.cache import CitryCache
@@ -54,6 +54,16 @@ class CitrySettings:
             when no ``dirs`` are set (so the default instance does nothing). The
             directories must be importable (on ``sys.path``/``PYTHONPATH``). See
             ``Citry.autodiscover`` and ``citry.autodiscovery``.
+        id_generator: A function returning the per-render id stamped on each
+            component instance (``component.id``, which drives the
+            ``data-cid-<id>`` markers that scope a component's CSS and JS on the
+            page). Given as a callable or a ``"path.to.func"`` import string; a
+            class is called once to build the generator, which suits a stateful
+            one (e.g. a counter). ``None`` uses the built-in generator. Override
+            it for stable ids in snapshot tests. The generator must return ids
+            that are unique among the components on one page. This does not touch
+            ``class_id``, which stays a stable hash of the component's import
+            path.
 
     """
 
@@ -63,3 +73,4 @@ class CitrySettings:
     cache: CitryCache | str | None = None
     sandbox_expressions: bool = True
     autodiscover: bool = True
+    id_generator: Callable[[], str] | str | None = None

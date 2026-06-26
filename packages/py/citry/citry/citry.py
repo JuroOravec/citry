@@ -51,7 +51,7 @@ from citry.settings import CitrySettings
 from citry.tag_rules import build_tag_rules
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from weakref import ReferenceType
 
     from citry.component import Component
@@ -88,6 +88,7 @@ class Citry:
         cache: CitryCache | str | None = None,
         sandbox_expressions: bool = True,
         autodiscover: bool = True,
+        id_generator: Callable[[], str] | str | None = None,
     ) -> None:
         # Asset search dirs must be absolute (same contract as DJC's
         # COMPONENTS.dirs); relative-to-py-file resolution needs no dirs at all.
@@ -104,6 +105,7 @@ class Citry:
             cache=cache,
             sandbox_expressions=sandbox_expressions,
             autodiscover=autodiscover,
+            id_generator=id_generator,
         )
 
         # The cache backend (docs/design/dependencies.md section 10): derived
@@ -111,6 +113,10 @@ class Citry:
         # here. Built from the settings spec; defaults to a per-instance
         # in-memory cache.
         self.cache: CitryCache = self._build_cache(cache)
+        # The override for the per-render component id, resolved from the
+        # settings spec to a live callable. None means "use the built-in
+        # generator" (the fallback lives at the mint site in component.py).
+        self.id_generator: Callable[[], str] | None = self._resolve_id_generator(id_generator)
         # The registry creates the built-in components (<c-provide>, ...) on
         # its first lookup, through this factory, so they exist in every
         # Citry instance. See ComponentRegistry._ensure_builtins.
@@ -327,6 +333,29 @@ class Citry:
             msg = (
                 f"Citry cache must provide get/set/delete/has (see citry.cache.CitryCache), got {type(spec).__name__}"
             )
+            raise TypeError(msg)
+        return spec
+
+    @staticmethod
+    def _resolve_id_generator(spec: Callable[[], str] | str | None) -> Callable[[], str] | None:
+        """
+        Build the render-id generator override from the settings spec.
+
+        ``None`` means no override (the built-in generator is used). An import
+        string is resolved like the cache spec: ``"path.to.gen"`` names either a
+        callable or a class, and a class is instantiated once into the generator
+        (so a stateful one, such as a counter, keeps its state per instance).
+        The result must be callable.
+        """
+        if spec is None:
+            return None
+        if isinstance(spec, str):
+            module_path, _, attr_name = spec.rpartition(".")
+            spec = getattr(import_module(module_path), attr_name)
+        if isinstance(spec, type):
+            spec = spec()
+        if not callable(spec):
+            msg = f"Citry id_generator must be callable (a function returning a str), got {type(spec).__name__}"
             raise TypeError(msg)
         return spec
 
