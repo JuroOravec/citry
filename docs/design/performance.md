@@ -13,7 +13,12 @@ parity. The Rust render walk reaches *roughly* Django parity (not a beat) and is
 the only route to parallelism, but it is a large project moving the
 compiler-output contract; the smaller levers (a security-sensitive runtime
 sandbox fast path ~2-3%, remaining Python micro-opts) do not add up to parity.
-The decision is binary: commit to the Rust-walk project, or accept ~1.3x. This
+The decision was framed as binary, commit to the Rust-walk project or accept
+~1.3x. A third lever has since shipped: citry renders each component body by
+running a Python function generated from it, rather than walking the body's node
+list (section 6.10), the Python-side version of the Rust walk. A few percent on
+a real page (more on static- and loop-heavy templates), not parity, at near-zero
+risk. This
 document records what changed and why, the cost model, and that analysis.
 
 This doc is about **consciously making the render faster**. It is the
@@ -556,6 +561,88 @@ walk - see the section 6 opening) can pick it up:
 - It was taken back out of the tree in **`60e1980`** ("revert: remove the Rust
   render engine from the live code").
 - To bring it forward again: `git revert 60e1980`, or cherry-pick from `b7b2f4e`.
+
+### 6.10 Rendering a body by running a generated function, not walking the nodes
+
+Section 6 framed the choice as binary, walk the node tree in Python or move that
+walk to Rust, and missed a third option that a cross-engine comparison
+surfaced. Jinja2 renders a warm page about **2x faster than citry and ~1.8x
+faster than a bare Django template** (`benchmarking.md` section 11). The reason
+is not that Jinja2 compiles and citry does not (both compile): citry compiled a
+template into **a list of node objects, and walked that list every render**,
+calling `node.render()` on each node, which is the same tree-walking interpreter
+Django is. Jinja2 instead compiles a template into **a Python function** where
+static text is a literal append, `{% if %}` is a Python `if`, and `{{ x }}` is
+an inline "evaluate, then append". Running that function *is* the render; there
+is no list to walk and no per-node call, because the CPython interpreter is the
+only interpreter involved. Doing the same in Python, generating a function from
+the body instead of walking it, removes that walk without moving anything to
+Rust.
+
+citry now does this for every render
+([`body_compile.py`](../../packages/py/citry/citry/body_compile.py)). For each
+component body it generates, once, a Python function that produces the body's
+output directly: static text becomes a literal append, `<c-if>`/`<c-for>`
+become Python `if`/`for`, and `{{ expr }}` becomes an inline evaluate-and-append.
+The work-heavy nodes (element attributes, components, slots, fills, nested
+templates) are left to their own `render` method, because their cost is the
+resolve/escape/evaluate work itself, which moving it inline cannot remove.
+
+Two things this must not change, and does not (proven byte-identical by a
+battery of constructs rendered both ways,
+[`test_compile_body.py`](../../packages/py/citry/tests/test_compile_body.py),
+plus the 203 KB benchmark page, modulo random ids):
+
+- **Constant parts stay precomputed.** The input is the body *after* `precompute_const_parts`
+  has computed the parts that depend only on constant inputs, so those are
+  already plain strings before this runs. `precompute_const_parts` is untouched, and the
+  generated function is cached per `(component class, set of Const values)`, the
+  same key the body uses.
+- **Component nesting stays unbounded.** A `<c-child>` is handed to
+  `ComponentNode.render`, which returns a `DeferredComponent` (it does not render
+  the child). The function returns the same `list[RenderPart]` walking the body
+  would, so `render_impl`'s queue drives nesting, never Python recursion.
+
+It is wired where the body is built and cached: the cache holds the body (the
+node list, which the const tests inspect) and the function generated from it,
+keyed together. The Rust compiler-output contract is untouched; this is an
+additive Python step.
+
+**Measured (this machine, A/B per section 1):**
+
+- **~3.1%** on the large benchmark page (12.97 -> 12.57 ms). The page is
+  attribute-heavy and construction-bound (section 8), so the part that becomes
+  inline code is a minority of the time. Every body is generated to a function:
+  the top-level component bodies at their build site, and the sub-bodies (slot
+  fallbacks, fills, default content, nested templates) on the nodes that own
+  them (see below). An earlier cut that generated only the top-level bodies was
+  ~2.6%.
+- **1.15x to 1.24x** on the body work in isolation, by shape: static-heavy
+  layout HTML 1.22x, a 50-row loop 1.24x, an expression-heavy body 1.15x, and an
+  **attribute-heavy body 1.01x** (no gain, because the eval/merge/escape work is
+  intrinsic, which is why attributes are left to their own render). So it pays
+  on static- and loop-heavy templates (real apps' layout shells) and does
+  nothing for attribute-dense ones.
+
+This lands in the same place as the archived Rust walk (section 6.9: 1.0-1.06x
+on a real page) and for the same reason, the leaf work dominates, but in Python
+at a fraction of the risk. It does **not** reach Jinja2: that gap is the
+component machinery (construction, section 8) and the per-expression sandbox
+(section 6.7), neither of which this touches, plus features Jinja2 lacks on
+purpose (the unbounded nesting above, the sandbox).
+
+**Sub-bodies are generated on the node that owns them.** A component's top body
+is generated at its build site, but a few nodes render a body of their own (a
+`<c-slot>` fallback, a `<c-fill>`, a component's default content, a nested
+template). Each generates a function for that body the same way and caches it on
+itself (`render_function_for` in `body_compile.py`). The node is the right place
+to cache it: `id(body)` is not safe (the Const cache can drop a body and the next
+one may land at the same identity), but a node lives exactly as long as the body
+it owns. Nested templates get a second small win here: they no longer rebuild
+their node list on every render. The two cases with no body of their own to
+generate are unaffected: element attributes (their resolve/escape cost is
+intrinsic) and `<c-child>` (rendered later from the queue, its own body generated
+at its own build site).
 
 ## 7. Working rules for optimization
 

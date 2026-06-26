@@ -213,6 +213,8 @@ def _make_body_slot(
     data_var: str | None,
     fallback_var: str | None,
     position: tuple[int, int] | None,
+    *,
+    holder: object,
 ) -> Slot:
     """
     Wrap a fill body (or a component's implicit default body) as a ``Slot``.
@@ -232,9 +234,12 @@ def _make_body_slot(
     owner provides around the slot. Invoked standalone (no slot site), the
     body keeps the captured provides. See docs/design/provide.md section 4.3.
     """
-    # Imported lazily: component_render imports the node classes, so importing
-    # the body walker at module load would be circular.
-    from citry.component_render import _render_body  # noqa: PLC0415
+    # Imported lazily: body_compile imports the node classes, so importing it at
+    # module load would be circular. The body becomes a render function once,
+    # cached on the node that owns it (holder).
+    from citry.body_compile import render_function_for  # noqa: PLC0415
+
+    render_fn = render_function_for(holder, lambda: body, sandboxed=context.sandboxed)
 
     def content_func(ctx: Any) -> CitryRender:
         provides = context.provides
@@ -256,7 +261,7 @@ def _make_body_slot(
             )
         else:
             render_context = context
-        return CitryRender(parts=_render_body(body, render_context), context=render_context)
+        return CitryRender(parts=render_fn(render_context), context=render_context)
 
     return Slot(
         body,
@@ -367,9 +372,10 @@ class TemplateNode(Node):
         # surrounding component's context, so it renders against the same
         # variables and writes any dependencies into the same context.
         #
-        # Imported lazily because component_render imports the node classes:
-        # importing the body pipeline at module load would be circular.
-        from citry.component_render import _compile_nested_template, _render_body  # noqa: PLC0415
+        # Imported lazily because these import the node classes: importing them
+        # at module load would be circular.
+        from citry.body_compile import render_function_for  # noqa: PLC0415
+        from citry.component_render import _compile_nested_template  # noqa: PLC0415
 
         if self._generator is None:
             # The nested template is validated like any other: the parse gets
@@ -377,8 +383,10 @@ class TemplateNode(Node):
             component = context.component
             user_rules = component.citry._tag_rules() if component is not None else None
             self._generator = _compile_nested_template(self.expr, user_rules)
-        parts = _render_body(self._generator(), context)
-        return CitryRender(parts=parts, context=context)
+        # The body becomes a render function once (cached on this node), so later
+        # renders neither rebuild the node list nor walk it.
+        render_fn = render_function_for(self, self._generator, sandboxed=context.sandboxed)
+        return CitryRender(parts=render_fn(context), context=context)
 
     def __repr__(self) -> str:
         return f"TemplateNode(position={self.position}, expr={self.expr!r})"
@@ -513,7 +521,8 @@ class TemplateHtmlAttr(HtmlAttr):
         The template is defined in the parent's scope, so it renders against the
         surrounding component's context (the same rule as ``TemplateNode``).
         """
-        from citry.component_render import _compile_nested_template, _render_body  # noqa: PLC0415
+        from citry.body_compile import render_function_for  # noqa: PLC0415
+        from citry.component_render import _compile_nested_template  # noqa: PLC0415
 
         if self._generator is None:
             # The nested template is validated like any other: the parse gets
@@ -521,8 +530,10 @@ class TemplateHtmlAttr(HtmlAttr):
             component = context.component
             user_rules = component.citry._tag_rules() if component is not None else None
             self._generator = _compile_nested_template(self.template, user_rules)
-        parts = _render_body(self._generator(), context)
-        return CitryRender(parts=parts, context=context)
+        # The body becomes a render function once (cached on this node), so later
+        # renders neither rebuild the node list nor walk it.
+        render_fn = render_function_for(self, self._generator, sandboxed=context.sandboxed)
+        return CitryRender(parts=render_fn(context), context=context)
 
     def __repr__(self) -> str:
         return f"TemplateHtmlAttr(key={self.key!r})"
@@ -839,7 +850,11 @@ class ComponentNode(Node):
         if not self.contains_fills:
             if all(isinstance(item, str) and not item.strip() for item in self.body):
                 return {}
-            return {"default": _make_body_slot(self.body, context, self.name, "default", None, None, self.position)}
+            return {
+                "default": _make_body_slot(
+                    self.body, context, self.name, "default", None, None, self.position, holder=self
+                )
+            }
 
         sink = FillSink(self.name)
         collect_fills_from_body(self.body, context, sink)
@@ -1098,7 +1113,9 @@ class SlotNode(Node):
 
         # The slot's own body, as a Slot: the fallback handle when a fill
         # exists, the rendered content when none does.
-        body_slot = _make_body_slot(self.body, context, type(component).__name__, name, None, None, self.position)
+        body_slot = _make_body_slot(
+            self.body, context, type(component).__name__, name, None, None, self.position, holder=self
+        )
 
         if fill is not None:
             slot_used = fill
@@ -1224,7 +1241,9 @@ class FillNode(Node):
         stays unrendered until the child component invokes the slot.
         """
         name, data_var, fallback_var = self._resolve_props(context)
-        slot = _make_body_slot(self.body, context, sink.component_name, name, data_var, fallback_var, self.position)
+        slot = _make_body_slot(
+            self.body, context, sink.component_name, name, data_var, fallback_var, self.position, holder=self
+        )
         sink.add(name, slot)
 
     def _resolve_props(self, context: CitryContext) -> tuple[str, str | None, str | None]:
