@@ -332,12 +332,6 @@ class ConstBodyCache:
         # template's list of static strings and nodes after the parts that
         # depend only on constant inputs have been computed (see precompute_const_parts).
         self._entries: OrderedDict[_CacheKey, list[BodyItem]] = OrderedDict()
-        # The render function built from each body. body_compile.py turns the
-        # body's node list into one Python function that produces the body's
-        # output directly (so a render runs that function instead of walking the
-        # node list). Keyed the same way, so a function is dropped together with
-        # the body it came from.
-        self._renderers: dict[_CacheKey, Any] = {}
 
     def get_or_build(
         self,
@@ -361,44 +355,20 @@ class ConstBodyCache:
             body = build()
             self._entries[key] = body
             while len(self._entries) > self._max_entries:
-                evicted, _ = self._entries.popitem(last=False)
-                self._renderers.pop(evicted, None)
+                self._entries.popitem(last=False)
             return body
-
-    def renderer_for(
-        self,
-        comp_cls: type[Component],
-        signature: ConstSignature,
-        build_renderer: Callable[[], _T],
-    ) -> _T:
-        """
-        Return the render function for ``(comp_cls, signature)``, building it once.
-
-        Paired with ``get_or_build``: that caches the body, this caches the
-        render function compiled from it. Same key, so the function is dropped
-        when its body is evicted.
-        """
-        key = (comp_cls, signature)
-        with self._lock:
-            renderer = self._renderers.get(key)
-            if renderer is None:
-                renderer = build_renderer()
-                self._renderers[key] = renderer
-            return renderer
 
     def evict_component(self, comp_cls: type[Component]) -> None:
         """Drop every entry of one component class (hot reload invalidation)."""
         with self._lock:
-            stale = [key for key in (*self._entries, *self._renderers) if key[0] is comp_cls]
+            stale = [key for key in self._entries if key[0] is comp_cls]
             for key in stale:
                 self._entries.pop(key, None)
-                self._renderers.pop(key, None)
 
     def clear(self) -> None:
         """Drop all entries."""
         with self._lock:
             self._entries.clear()
-            self._renderers.clear()
 
     def values(self) -> list[list[BodyItem]]:
         """A snapshot of the cached bodies (mainly for tests and debugging)."""

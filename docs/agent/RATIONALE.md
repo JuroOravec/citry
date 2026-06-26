@@ -22,7 +22,7 @@ grammar rule, one AST field, one line of codegen) is frequently not local, and
 the failure mode is silent: the code reads correctly, the crate compiles, and
 the drift only surfaces later in a different language binding or at runtime.
 
-## Incidents that shaped the rules (session 9.1.x)
+## Incidents that shaped the rules
 
 ### Trusting the grammar over running the parser
 
@@ -61,6 +61,21 @@ encoded the old behavior, not to special-case the code to keep them green. A
 failing test under a deliberate, more-correct change is usually evidence the
 test captured the old bug. The rule is to update such tests and call the
 contract change out explicitly.
+
+### Trusting an in-process timer that keeps the fastest warm run over the fresh-process benchmark
+
+A render change measured as a few-percent speed-up by an in-process A/B that
+keeps the fastest warm run. It was built, made always-on, and nearly kept. The
+cross-engine benchmark (fresh subprocess per cell, median of 5) then showed the
+opposite: a large first-render regression and a flat warm render. The best-of-N
+timer hid both failure modes by construction. It never renders the first,
+uncompiled pass, so a one-time compile cost is invisible to it; and keeping the
+best run samples out the steady per-render overhead the change adds. Comparing
+the new path against the old with both carrying the new machinery also hid that
+machinery's own cost. This is why the in-process timer is for finding and sizing
+a change while the keep-or-drop decision is the fresh-process median
+(`performance.md` section 1). The change is recoverable in git if the cost model
+ever shifts.
 
 ## What the industry has observed
 

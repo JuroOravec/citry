@@ -149,6 +149,13 @@ forward. The motivation that could still justify it is portability (a host-agnos
 walk that JS/PHP/Go reuse), not speed. Full write-up:
 [`performance.md`](../design/performance.md) section 6.9.
 
+The same body-walk lever was also tried on the Python side (generating a function
+from each component body instead of walking it). It reached the same ~parity
+result for the same construction-bound reason, plus a large one-time first-render
+cost, and was likewise reverted; the implementation is preserved in commit
+`ec5faaf` and written up in
+[`performance.md`](../design/performance.md) section 6.10.
+
 ---
 
 For the reasoning behind these rules and the incidents that shaped them, see

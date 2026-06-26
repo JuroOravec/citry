@@ -571,7 +571,7 @@ def _render_one(
         compiled = _get_compiled_template(comp_cls)
         generate = compiled.generate if compiled is not None else None
         if compiled is None or generate is None:
-            parts = []
+            body: list[BodyItem] = []
         else:
             const_vars, signature = extract_const_vars(tpl_data, used_vars=compiled.used_vars)
 
@@ -587,29 +587,15 @@ def _render_one(
 
             body = citry_instance._const_body_cache.get_or_build(comp_cls, signature, build)
 
-            # The body (its static text and nodes, with the parts that never
-            # change already computed) is turned into one Python function that
-            # produces the output directly, instead of citry re-walking the node
-            # list on every render (body_compile.py). Built once per (component
-            # class, set of Const values) and cached next to the body; imported
-            # here to avoid a module-load cycle.
-            def build_renderer() -> Callable[[CitryContext], list[RenderPart]]:
-                from citry.body_compile import compile_body  # noqa: PLC0415
-
-                return compile_body(body, sandboxed=citry_instance.settings.sandbox_expressions)
-
-            render_fn = citry_instance._const_body_cache.renderer_for(comp_cls, signature, build_renderer)
-
-            # 7. Run that function to get this component's parts. Any nested
-            #    <c-child> comes back as an unrendered DeferredComponent part;
-            #    render_impl renders those (and runs on_component_rendered for
-            #    each) once everything inside them is done, so a component is
-            #    never rendered by its parent (no recursion limit on nesting).
-            #    This render is the component's whole output, marked as its root
-            #    render (serialization finds component boundaries by that flag).
-            #    A transparent component opts out: its output joins the
-            #    surrounding frame and gets no data-cid marker (e.g. <c-provide>).
-            parts = render_fn(context)
+        # 7. Walk the body into a parts list and wrap it in a CitryRender. Any nested
+        #    components are left as unrendered DeferredComponent parts; render_impl
+        #    renders them and runs on_component_rendered for each one once everything
+        #    inside it has been rendered. This render is the component's whole
+        #    output, so it is marked as the component's root render (serialization
+        #    relies on the flag to find component frame boundaries). A transparent
+        #    component opts out: its output joins the surrounding frame and gets no
+        #    data-cid marker (e.g. the <c-provide> built-in).
+        parts = _render_body(body, context)
     except Exception as render_error:
         if generator is None:
             raise

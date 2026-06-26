@@ -880,3 +880,49 @@ pre-compiled macro bytecode. It is slowest to warm up: its `first` render
 (3.31x) compiles the whole macro library at once. That is the compiled-template
 trade-off at page scale, and it is the same effect the small-scenario reading
 calls out, amplified by 35 components instead of one.
+
+### 2026-06-26 - generated-function render lever reverted; reverted-state rerun
+
+A Jinja2-style optimization was explored and then reverted: generate a Python
+function from each component body and run it instead of walking the body's node
+list every render (the Python analogue of the archived Rust walk). It was
+byte-identical and a small win on the body work in isolation (1.15x to 1.24x on
+static- and loop-heavy bodies), but the full-page measurement told the real
+story. An in-process best-of-N timer reported a ~3% warm-render win; the
+cross-engine benchmark below showed the opposite: the first render regressed
+about +33% (every body's function is generated on the first render, a one-time
+cost with no warm payoff), and the warm render was flat (the per-component
+bookkeeping that selects the right generated function costs about what it saves).
+The page is construction-bound ([`performance.md`](performance.md) section 8), so
+a faster body walk does not move the whole-page number. Reverted; the
+implementation is preserved in commit `ec5faaf`. Full write-up:
+[`performance.md`](performance.md) section 6.10; the measurement lesson:
+[`docs/agent/RATIONALE.md`](../agent/RATIONALE.md).
+
+The tables below are the reverted state, which is the same render path as the
+2026-06-25 tables (the lever shipped and was reverted between them); the small
+differences from those (for example citry large subsequent 14.17 ms vs 13.65 ms)
+are run-to-run noise, not a regression.
+
+Apple M4, Python 3.13.12, median of 5 fresh-process rounds; django 6.0.6,
+django-components 0.151.0, jinja2 3.1.6, citry 0.1.0 (citry_core 1.3.0,
+release). Ratios vs the `django` row.
+
+Small scenario:
+
+| engine | startup | import | first | subsequent |
+|---|---|---|---|---|
+| django | 77.26 ms (1.00x) | 76.66 ms (1.00x) | 1.07 ms (1.00x) | 40.2 us (1.00x) |
+| django-components | 77.42 ms (1.00x) | 76.78 ms (1.00x) | 1.41 ms (1.31x) | 202.8 us (5.04x) |
+| citry | 29.84 ms (0.39x) | 29.40 ms (0.38x) | 1.63 ms (1.52x) | 73.1 us (1.82x) |
+| jinja2 | 14.63 ms (0.19x) | 14.37 ms (0.19x) | 1.20 ms (1.12x) | 23.5 us (0.58x) |
+
+Large scenario:
+
+| engine | startup | import | first | subsequent |
+|---|---|---|---|---|
+| django | 82.31 ms (1.00x) | 76.87 ms (1.00x) | 17.72 ms (1.00x) | 10.95 ms (1.00x) |
+| django-components | 82.08 ms (1.00x) | 77.33 ms (1.01x) | 65.08 ms (3.67x) | 45.92 ms (4.19x) |
+| citry | 37.72 ms (0.46x) | 28.63 ms (0.37x) | 37.65 ms (2.12x) | 14.17 ms (1.29x) |
+| citry-const | 37.95 ms (0.46x) | 29.17 ms (0.38x) | 40.14 ms (2.26x) | 14.52 ms (1.33x) |
+| jinja2 | 18.38 ms (0.22x) | 14.79 ms (0.19x) | 58.14 ms (3.28x) | 6.27 ms (0.57x) |

@@ -71,17 +71,17 @@ django-components):
 
 ## Results (small scenario)
 
-Measured 2026-06-25 on an Apple M4, Python 3.13.12, median of 5 fresh-process
+Measured 2026-06-26 on an Apple M4, Python 3.13.12, median of 5 fresh-process
 rounds per cell. Versions: django 6.0.6, django-components 0.151.0, jinja2
 3.1.6, citry 0.1.0 (citry_core 1.3.0, release build). Ratios are vs the
 `django` row.
 
 | engine | startup | import | first | subsequent |
 |---|---|---|---|---|
-| django | 79.21 ms (1.00x) | 77.37 ms (1.00x) | 1.06 ms (1.00x) | 41.0 us (1.00x) |
-| django-components | 78.86 ms (1.00x) | 77.28 ms (1.00x) | 1.41 ms (1.33x) | 199.4 us (4.86x) |
-| citry | 29.80 ms (0.38x) | 29.20 ms (0.38x) | 1.53 ms (1.45x) | 71.5 us (1.74x) |
-| jinja2 | 14.68 ms (0.19x) | 14.26 ms (0.18x) | 1.21 ms (1.15x) | 23.2 us (0.57x) |
+| django | 77.26 ms (1.00x) | 76.66 ms (1.00x) | 1.07 ms (1.00x) | 40.2 us (1.00x) |
+| django-components | 77.42 ms (1.00x) | 76.78 ms (1.00x) | 1.41 ms (1.31x) | 202.8 us (5.04x) |
+| citry | 29.84 ms (0.39x) | 29.40 ms (0.38x) | 1.63 ms (1.52x) | 73.1 us (1.82x) |
+| jinja2 | 14.63 ms (0.19x) | 14.37 ms (0.19x) | 1.20 ms (1.12x) | 23.5 us (0.58x) |
 
 Highlights, with the relative-only caveat above:
 
@@ -90,8 +90,8 @@ Highlights, with the relative-only caveat above:
   render time; the meaningful reading is within each pair.
 - jinja2 is the fast no-component baseline it is known for: it imports and
   starts up about 5x faster than the Django stack, and its repeat render is
-  about 1.8x faster than a bare Django template (and ~8.6x faster than
-  django-components). It pays for that on first render (1.15x), where
+  about 1.7x faster than a bare Django template (and ~8.6x faster than
+  django-components). It pays for that on first render (1.12x), where
   compiling the template to Python bytecode costs a little more than Django's
   parse; the speed shows up on every render after.
 - citry imports and starts up about 2.6x faster than the Django stack.
@@ -104,13 +104,14 @@ Highlights, with the relative-only caveat above:
   returns is a render-invariant literal to mark constant. Const has a fair
   test in the large scenario, where there are static literals to mark.
 
-The small table was last measured 2026-06-12, before the phase-3 feature and
-render-path work landed, so its citry numbers differ from that older table;
-compare rows within this run, never numbers across the dated tables.
+The small scenario also has older dated tables in the results log
+([`docs/design/benchmarking.md`](../docs/design/benchmarking.md) section 11),
+measured on earlier code; compare rows within this run, never numbers across the
+dated tables.
 
 ## Results (large scenario)
 
-Measured 2026-06-25 on an Apple M4, Python 3.13.12, median of 5 fresh-process
+Measured 2026-06-26 on an Apple M4, Python 3.13.12, median of 5 fresh-process
 rounds per cell. Versions: django 6.0.6, django-components 0.151.0, jinja2
 3.1.6, citry 0.1.0 (citry_core 1.3.0, release build). Ratios are vs the
 `django` row. The large scenario is the full project-management page: 35
@@ -119,18 +120,18 @@ provide/inject, slots/fills, and dynamic elements.
 
 | engine | startup | import | first | subsequent |
 |---|---|---|---|---|
-| django | 81.90 ms (1.00x) | 76.78 ms (1.00x) | 17.82 ms (1.00x) | 10.78 ms (1.00x) |
-| django-components | 82.25 ms (1.00x) | 76.73 ms (1.00x) | 65.45 ms (3.67x) | 46.02 ms (4.27x) |
-| citry | 38.36 ms (0.47x) | 28.64 ms (0.37x) | 37.79 ms (2.12x) | 13.65 ms (1.27x) |
-| citry-const | 38.02 ms (0.46x) | 29.19 ms (0.38x) | 38.44 ms (2.16x) | 14.82 ms (1.37x) |
-| jinja2 | 18.16 ms (0.22x) | 14.54 ms (0.19x) | 58.93 ms (3.31x) | 6.06 ms (0.56x) |
+| django | 82.31 ms (1.00x) | 76.87 ms (1.00x) | 17.72 ms (1.00x) | 10.95 ms (1.00x) |
+| django-components | 82.08 ms (1.00x) | 77.33 ms (1.01x) | 65.08 ms (3.67x) | 45.92 ms (4.19x) |
+| citry | 37.72 ms (0.46x) | 28.63 ms (0.37x) | 37.65 ms (2.12x) | 14.17 ms (1.29x) |
+| citry-const | 37.95 ms (0.46x) | 29.17 ms (0.38x) | 40.14 ms (2.26x) | 14.52 ms (1.33x) |
+| jinja2 | 18.38 ms (0.22x) | 14.79 ms (0.19x) | 58.14 ms (3.28x) | 6.27 ms (0.57x) |
 
 Highlights, with the relative-only caveat above:
 
-- citry imports and starts up about 2x faster than the Django stack.
+- citry imports about 2.7x and starts up about 2.2x faster than the Django stack.
 - Against django-components (the fair comparison, since both pay the
   component-machinery cost) citry is about 1.7x faster on first render and
-  about 3.4x faster on repeat renders.
+  about 3.2x faster on repeat renders.
 - Both component engines are slower than a bare Django template, which does
   none of the per-render component work (construction, slots, dependency
   collection, id marking); the relevant question is the relative cost of
@@ -138,10 +139,10 @@ Highlights, with the relative-only caveat above:
   optimization (see the section 11 log in `docs/design/benchmarking.md`),
   citry's repeat render is about 1.3x a bare Django template, down from 1.85x.
 - jinja2 (no component model: each component is a macro) is the fastest engine
-  to start up and import (about 5x the Django stack, about 2x citry) and has
-  the fastest repeat render of any engine here (0.56x a bare Django template,
-  about 7.6x faster than django-components), because each render just runs
-  pre-compiled macro bytecode. It pays for that on first render (3.31x), where
+  to start up and import (about 4.5x to 5x the Django stack, about 2x citry) and has
+  the fastest repeat render of any engine here (0.57x a bare Django template,
+  about 7.3x faster than django-components), because each render just runs
+  pre-compiled macro bytecode. It pays for that on first render (3.28x), where
   the whole macro library compiles at once. The classic compiled-template
   trade-off, at page scale: slowest to warm up, fastest once warm.
 - `citry-const` is within noise of plain citry here. The const variant

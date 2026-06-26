@@ -18,7 +18,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Source: benchmarks/README.md "Results (large scenario)", measured 2026-06-25
+# Source: benchmarks/README.md "Results (large scenario)", measured 2026-06-26
 # (Apple M4, Python 3.13.12, median of 5 fresh-process runs). Times in
 # milliseconds, lower is better. Keep SERIES and CAPTION in step with the table.
 CAPTION = (
@@ -28,10 +28,10 @@ CAPTION = (
 METRICS = ["Startup", "Import", "First render", "Repeat render"]
 # Each row: engine label, [startup, import, first render, repeat render], bar color.
 SERIES = [
-    ("Django", [81.90, 76.78, 17.82, 10.78], "#64748b"),
-    ("django-components", [82.25, 76.73, 65.45, 46.02], "#f97316"),
-    ("jinja2", [18.16, 14.54, 58.93, 6.06], "#3b82f6"),
-    ("Citry", [38.36, 28.64, 37.79, 13.65], "#10b981"),
+    ("Django", [82.31, 76.87, 17.72, 10.95], "#64748b"),
+    ("django-components", [82.08, 77.33, 65.08, 45.92], "#f97316"),
+    ("jinja2", [18.38, 14.79, 58.14, 6.27], "#3b82f6"),
+    ("Citry", [37.72, 28.63, 37.65, 14.17], "#10b981"),
 ]
 OUT_PATH = Path(__file__).resolve().parent.parent / "docs" / "assets" / "benchmark.png"
 BAR_WIDTH = 0.20
