@@ -197,7 +197,10 @@ class TestTemplateData:
                 return {"greeting": f"Hello {kwargs['name']}!"}
 
         inst = MyComp._create_instance()
-        data = inst.template_data(kwargs={"name": "World"})
+        # The framework always calls template_data with both kwargs and slots
+        # (see component_render.py); this override declares the documented
+        # (kwargs, slots) signature, so both must be supplied.
+        data = inst.template_data(kwargs={"name": "World"}, slots=None)
         assert data == {"greeting": "Hello World!"}
 
 

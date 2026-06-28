@@ -44,6 +44,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from citry.citry_render import CitryRender
     from citry.component import Component
 
@@ -81,16 +83,24 @@ class CitryElement:
         self.kwargs = kwargs
         self.slots = slots or {}
 
-    def render(self) -> CitryRender:
+    def render(self, *, template_globals: Mapping[str, Any] | None = None) -> CitryRender:
         """
         Render this component into a ``CitryRender``.
 
         Each call mints fresh per-instance state (render_id, etc.), so the same
         CitryElement can be rendered multiple times with distinct identities.
 
+        ``template_globals`` adds or overrides template variables for this one
+        render, layered on top of the instance's ``citry.template_globals`` and
+        under each component's own ``template_data``. They reach every component
+        in the render, including nested children, embedded elements, and slot
+        content, which suits per-request values (the current user, a request id)
+        that should not be stored on the shared instance.
+
         Returns a ``CitryRender`` (the render-phase output), not a string. Call
         ``.serialize()`` on it (or ``str()``) to get the HTML. ``str()`` on the
-        element itself runs the full chain with sensible defaults.
+        element itself runs the full chain with sensible defaults (and no
+        ``template_globals``).
         """
         # Imported lazily to break the import cycle: component_render imports the
         # node classes, the nodes import CitryElement (for auto-rendering a
@@ -98,7 +108,7 @@ class CitryElement:
         # in component_render at module load.
         from citry.component_render import render_impl  # noqa: PLC0415
 
-        return render_impl(self)
+        return render_impl(self, render_globals=dict(template_globals) if template_globals is not None else None)
 
     def __str__(self) -> str:
         # Convenience: str(element) runs the full pipeline

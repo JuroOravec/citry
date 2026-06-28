@@ -54,6 +54,16 @@ class CitrySettings:
             when no ``dirs`` are set (so the default instance does nothing). The
             directories must be importable (on ``sys.path``/``PYTHONPATH``). See
             ``Citry.autodiscover`` and ``citry.autodiscovery``.
+        template_globals: Variables exposed to every component's template
+            without being returned from each ``template_data()``. They are
+            merged into every component's template variables on render, so a
+            template can reference one directly (``{{ site_name }}``). A
+            component's own ``template_data`` wins when it returns a key of the
+            same name, so globals act as defaults. This field is the
+            construction-time seed; the live, mutable copy is
+            ``Citry.template_globals``, which is how you add or change a global
+            after the instance exists (including the default instance, created
+            at import before your code runs).
         id_generator: A function returning the per-render id stamped on each
             component instance (``component.id``, which drives the
             ``data-cid-<id>`` markers that scope a component's CSS and JS on the
@@ -74,3 +84,4 @@ class CitrySettings:
     sandbox_expressions: bool = True
     autodiscover: bool = True
     id_generator: Callable[[], str] | str | None = None
+    template_globals: Mapping[str, Any] = field(default_factory=dict)

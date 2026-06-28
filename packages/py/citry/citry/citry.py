@@ -88,6 +88,7 @@ class Citry:
         cache: CitryCache | str | None = None,
         sandbox_expressions: bool = True,
         autodiscover: bool = True,
+        template_globals: Mapping[str, Any] | None = None,
         id_generator: Callable[[], str] | str | None = None,
     ) -> None:
         # Asset search dirs must be absolute (same contract as DJC's
@@ -106,7 +107,16 @@ class Citry:
             sandbox_expressions=sandbox_expressions,
             autodiscover=autodiscover,
             id_generator=id_generator,
+            template_globals=dict(template_globals) if template_globals is not None else {},
         )
+
+        # The live template globals: variables injected into every component's
+        # template variables on render (see CitrySettings.template_globals).
+        # Seeded from settings as a separate dict, so changing them on the
+        # instance (citry.template_globals["x"] = ...) leaves the construction
+        # mapping untouched, and the default instance - created at import, before
+        # user code runs - can still be configured after the fact.
+        self.template_globals: dict[str, Any] = dict(self.settings.template_globals)
 
         # The cache backend (docs/design/dependencies.md section 10): derived
         # content such as the dependencies extension's processed JS/CSS lives

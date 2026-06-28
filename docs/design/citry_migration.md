@@ -214,14 +214,14 @@ below for the per-feature verdicts.
 
 | File | Lines | Django coupling | Notes |
 |---|---|---|---|
-| `component.py` | 3657 | Heavy | Component class, metaclass, lifecycle. Core of citry. |
+| `component.py` | 3620 | Heavy | Component class, metaclass, lifecycle. Core of citry. |
 | `component_render.py` | 1444 | Heavy | Render pipeline, component tree. Core of citry. |
-| `slots.py` | 1698 | Medium | Slot/fill system. Core of citry. |
-| `extension.py` | 1557 | Light | Plugin/hook system. Core of citry. |
-| `component_registry.py` | 718 | Light | Registry, weakrefs. Evolving (#1195). |
+| `slots.py` | 1688 | Medium | Slot/fill system. Core of citry. |
+| `extension.py` | 1555 | Light | Plugin/hook system. Core of citry. |
+| `component_registry.py` | 705 | Light | Registry, weakrefs. Evolving (#1195). |
 | `component_media.py` | 1290 | Medium | CSS/JS management. Will become extension (#1144). |
 | `dependencies.py` | 1927 | Heavy | JS/CSS dependency rendering. Blueprint for the citry dependency extension; definitely ports. |
-| `provide.py` | 175 | Light | Provide/inject. |
+| `provide.py` | 174 | Light | Provide/inject. |
 | `attributes.py` | 441 | None | HTML attribute merging. |
 | `expression.py` | 135 | Medium | Template expression eval. |
 | `context.py` | 50 | Medium | Context key management. |
@@ -236,7 +236,7 @@ below for the per-feature verdicts.
 
 | File | Lines | Notes |
 |---|---|---|
-| `app_settings.py` | 959 | Settings fields will split: some move to citry settings, some stay Django-specific. |
+| `app_settings.py` | 953 | Settings fields will split: some move to citry settings, some stay Django-specific. |
 | `template.py` | 486 | Django Template integration, template caching, origin mapping. (Missed in the original classification.) |
 | `apps.py` | 121 | Django AppConfig. |
 | `autodiscovery.py` | 111 | Django app discovery. |
@@ -316,7 +316,7 @@ Status legend:
   silently skipped).
 - ⏭️ **Skip (Django)** - Django-specific; stays in django-components.
 
-### `component.py` (3657 lines)
+### `component.py` (3620 lines)
 
 <details>
 <summary>Features</summary>
@@ -380,7 +380,7 @@ Status legend:
 
 </details>
 
-### `slots.py` (1698 lines)
+### `slots.py` (1688 lines)
 
 <details>
 <summary>Features</summary>
@@ -407,7 +407,7 @@ Status legend:
 
 </details>
 
-### `extension.py` (1557 lines)
+### `extension.py` (1555 lines)
 
 <details>
 <summary>Features</summary>
@@ -429,7 +429,7 @@ Status legend:
 
 </details>
 
-### `component_registry.py` (718 lines)
+### `component_registry.py` (705 lines)
 
 <details>
 <summary>Features</summary>
@@ -492,7 +492,7 @@ pipeline (`CitryRender` parts + `CitryContext.extra`).
 
 </details>
 
-### `provide.py` (175 lines)
+### `provide.py` (174 lines)
 
 <details>
 <summary>Features</summary>
@@ -959,7 +959,7 @@ Ported function by function, on demand. Current state:
 | Feature | Status | Notes |
 |---|---|---|
 | `snapshot_context` / `_copy_block_context` | ⏭️ Skip (Django) | Django `Context`/`BlockContext` mechanics |
-| `gen_context_processors_data` | ⏭️ Skip (Django) | `context_processors_data` was dropped from citry |
+| `gen_context_processors_data` | ⏭️ Skip (Django) | Django request-coupled processors; citry's instance-wide replacement is `template_globals` (see the implementation log) |
 
 </details>
 
@@ -987,7 +987,7 @@ Ported function by function, on demand. Current state:
 
 </details>
 
-### `util/django_monkeypatch.py` (372 lines)
+### `util/django_monkeypatch.py` (371 lines)
 
 <details>
 <summary>Features</summary>
@@ -2943,3 +2943,77 @@ the user-facing docs remain, deliberately).
 **Tests:** `tests/test_contrib_hosts.py` (Flask mount via a fake WSGI host,
 Django patterns/views/cache against real Django, cache adapters against
 fakes), `tests/test_deps_fragments.py` (`TestServedLocalFiles`).
+
+### Template globals (`citry/settings.py`, `citry/citry.py`, `citry/component_render.py`, `citry/citry_element.py`)
+
+**What:** Variables exposed to every component's template without being returned
+from each `template_data()`. Two layers: instance-wide globals, set at
+construction with `Citry(template_globals={...})` or changed on a live instance
+through `citry.template_globals` (a plain dict); and a per-render override,
+`element.render(template_globals={...})`, for one render only. Both are merged
+into every component's template variables on render, lowest precedence first:
+instance globals, then the per-render override, then the component's own
+`template_data` (which wins), so globals act as defaults. Full design:
+[`template_globals.md`](template_globals.md).
+
+**Why:** Citry's template variables deliberately do not cross a component
+boundary (each component gets fresh variables from its own `template_data`), so a
+value many components need (a site name, the current user, a feature flag)
+otherwise has to be returned from every `template_data()`, or injected by a
+hand-written extension's `on_component_data`. `template_globals` is the
+first-class, instance-wide channel for that. It is citry's replacement for
+django-components' `context_processors_data` (which was dropped), without that
+feature's coupling to a request object.
+
+**Design decisions:**
+- **Seed on settings, live copy on the instance.** `CitrySettings.template_globals`
+  holds the construction-time seed (the frozen settings stay immutable); the
+  instance keeps a separate live `dict` copied from it. Mutating the live dict
+  never touches the seed, and the default `citry` instance, created at import
+  before user code runs, can still be configured afterward. This mirrors how
+  `cache` and `id_generator` resolve a settings spec to a live attribute.
+- **A plain dict, not a wrapper class.** Single dict operations are atomic under
+  the GIL, so a wrapper guarding mutations earned nothing over a plain dict for
+  the instance-wide store, and `set` / `update` / `del` / `clear` are already the
+  vocabulary the feature needs.
+- **Merged after schema validation.** The overlay happens after `_normalize_data`
+  validates a component's own `template_data` against its declared `TemplateData`,
+  so a global key need not appear in that schema and never trips its
+  unexpected-field check. The merge is skipped when the instance has no globals,
+  so an instance without any pays nothing.
+- **Component wins on a clash.** `{**globals, **template_data}`: the most specific
+  scope (the component) overrides the ambient default, the way a local value
+  shadows an inherited one elsewhere.
+- **Per-render override via a context variable.** `render(template_globals=...)`
+  is render-wide and must reach nested children, embedded elements, and slot
+  content, so it rides a `contextvars.ContextVar` that `render_impl` sets for the
+  render and resets on exit, instead of being threaded through every node and
+  slot. `_render_one` reads it at the merge site, layering it between the
+  instance globals and the component's own data. Each thread or async task keeps
+  its own value. Threading it explicitly was rejected: about ten hot-path call
+  sites, easy to silently miss one.
+
+**Usage:**
+
+```python
+from citry import Citry, Component
+
+app = Citry(template_globals={"site_name": "Acme"})
+app.template_globals["year"] = 2026          # add or change on a live instance
+
+class Footer(Component):
+    citry = app
+    template = """
+    <footer>{{ site_name }} {{ year }}</footer>
+    """
+
+Footer().render(template_globals={"year": 2027})   # for this render only
+```
+
+**Tests:** `tests/test_template_globals.py`. Instance globals: visible without
+`template_data`, reaches nested children, per-instance isolation,
+post-construction and default-instance configuration, dict mutation, defensive
+copy, component-wins precedence, schema bypass. Per-render override: visibility,
+combining with and overriding instance globals, losing to component data,
+reaching nested children / embedded elements / slot content, no leak to a later
+render, no instance mutation.

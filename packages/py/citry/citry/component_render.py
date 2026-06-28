@@ -33,6 +33,7 @@ its own props and slots, never an inherited context.
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from citry.assets import load_template
@@ -72,7 +73,47 @@ if TYPE_CHECKING:
     from citry_core.template_parser import TagRules
 
 
+# Per-render template globals: the variables passed to a single render through
+# Component.render(template_globals=...). Held in a context variable because the
+# value is the same for the whole render and must reach every nested render
+# (deferred children, embedded {{ element }} values, slot content) without being
+# threaded through each node and slot; a concurrent render on another thread or
+# task keeps its own value. None means no per-render override was given.
+_render_globals: ContextVar[dict[str, Any] | None] = ContextVar("citry_render_globals", default=None)
+
+
 def render_impl(
+    element: CitryElement,
+    parent: Component | None = None,
+    provides: dict[str, Any] | None = None,
+    *,
+    render_globals: dict[str, Any] | None = None,
+) -> CitryRender:
+    """
+    Render a component and everything inside it into a finished ``CitryRender``.
+
+    The public render entry: ``CitryElement.render`` calls it, and a composed
+    element found in a ``{{ ... }}`` expression renders through it too.
+
+    ``render_globals`` are the per-render template variables from
+    ``Component.render(template_globals=...)``. They are merged into every
+    component in this render, on top of the instance's ``citry.template_globals``
+    and under a component's own ``template_data``. They are kept in a context
+    variable for the duration of the render, so every nested render sees them
+    without being passed the value. ``None`` (the default) adds no override and
+    leaves any enclosing render's globals in place, so a nested ``render_impl``
+    call does not disturb the render it runs inside.
+    """
+    if render_globals is None:
+        return _render_tree(element, parent, provides)
+    token = _render_globals.set(render_globals)
+    try:
+        return _render_tree(element, parent, provides)
+    finally:
+        _render_globals.reset(token)
+
+
+def _render_tree(
     element: CitryElement,
     parent: Component | None = None,
     provides: dict[str, Any] | None = None,
@@ -489,6 +530,19 @@ def _render_one(
     tpl_data = _normalize_data(component.template_data(component.kwargs, component.slots), comp_cls.TemplateData)
     js_data = _normalize_data(component.js_data(component.kwargs, component.slots), comp_cls.JsData)
     css_data = _normalize_data(component.css_data(component.kwargs, component.slots), comp_cls.CssData)
+
+    # 3.5 Overlay template globals: variables exposed to every component's
+    #     template without being returned from each template_data(). Two layers,
+    #     lowest precedence first: this instance's citry.template_globals, then
+    #     any per-render globals from Component.render(template_globals=...). The
+    #     component's own data wins over both, so all globals go under tpl_data.
+    #     Merged after the schema check above, so a global need not appear in a
+    #     component's declared TemplateData. Skipped when there are none, so a
+    #     render with no globals pays nothing here.
+    instance_globals = citry_instance.template_globals
+    render_globals = _render_globals.get()
+    if instance_globals or render_globals:
+        tpl_data = {**instance_globals, **(render_globals or {}), **tpl_data}
 
     # 4. Build the render-scoped context. ``variables`` are the template
     #    variables (the template_data output); ``extra`` is the tree-wide
