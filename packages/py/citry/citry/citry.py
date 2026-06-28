@@ -55,7 +55,7 @@ if TYPE_CHECKING:
     from weakref import ReferenceType
 
     from citry.component import Component
-    from citry.extension import Extension
+    from citry.extension import Extension, ExtensionCommand
     from citry.util.routing import URLRoute
     from citry_core.template_parser import TagRules
 
@@ -263,6 +263,18 @@ class Citry:
         component JS/CSS, the client runtime, and extension endpoints.
         """
         return self.extensions.urls
+
+    @property
+    def commands(self) -> dict[str, tuple[type[ExtensionCommand], ...]]:
+        """
+        This instance's CLI commands, keyed by extension name.
+
+        Each registered extension contributes the commands it declares in
+        ``Extension.commands``; the ``citry`` command-line tool reaches one as
+        ``citry ext run <extension name> <command name>``. See
+        ``ExtensionManager.commands`` for ordering and the uniqueness guarantee.
+        """
+        return self.extensions.commands
 
     @property
     def mounted_prefix(self) -> str | None:

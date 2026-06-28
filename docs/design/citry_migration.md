@@ -409,7 +409,7 @@ Status legend:
 
 ### `extension.py` (1557 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -423,7 +423,7 @@ Status legend:
 | Extension specs as import strings (`"path.to.Ext"`) | ✅ Done | |
 | `extensions_defaults` | ✅ Done | |
 | `get_extension(name)` / `get_extension_command(name, cmd)` | ✅ Done | |
-| `ComponentCommand` (CLI commands) | 🚧 To migrate | `ExtensionCommand` stub exists; full CLI integration is a later phase |
+| `ComponentCommand` (CLI commands) | ✅ Done (reshaped) | Built as the grown `ExtensionCommand` plus the framework-neutral `build_parser` / `run` in `citry/command.py`, aggregated across extensions via `Citry.commands` and surfaced by the `citry` executable ([`extension_commands.md`](extension_commands.md)) |
 | `add_extension_urls` / `remove_extension_urls` (`URLRoute`) | ✅ Done (reshaped) | `Extension.urls` (list or property) combined into `Citry.urls`; user extensions namespaced under `ext/<name>/` ([`dependencies.md`](dependencies.md) section 9.1) |
 | `mark_extension_hook_api` doc marker | ♻️ Superseded | Docs tooling concern |
 
@@ -751,24 +751,24 @@ stays in django-components; the verdicts below are about each *field*.
 
 ### `commands/` + `management/`
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
 |---|---|---|
-| `components` CLI (`list`, `create`, `upgrade`, `ext list`, `ext run`) + Django management bridge | ❓ Ambiguous | The `ExtensionCommand` surface exists in citry as a stub. Decide whether citry ships its own CLI entry point (also relevant: MCP, djc #1118) or stays a library with host CLIs on top |
+| `components` CLI (`list`, `create`, `upgrade`, `ext list`, `ext run`) + Django management bridge | ✅ Done (diverged) | The standalone `citry` CLI ships `list` / `create` / `ext list` / `ext run`, plus `--app module:attribute` engine selection and `--version` (`citry/commands/`, `citry/__main__.py`). `upgrade` is dropped (Django-template legacy); the Django management bridge and an MCP server were deliberately not built ([`extension_commands.md`](extension_commands.md) section 14) |
 | `startcomponent` / `upgradecomponent` scaffolding commands | ⏭️ Skip (Django) | Generate Django-flavored files; a citry scaffolder would be new design, not a port |
 
 </details>
 
 ### `compat/django.py`
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
 |---|---|---|
-| `load_as_django_command` (`ComponentCommand` -> Django management command) | ⏭️ Skip (Django) | The host-side half of the CLI question |
+| `load_as_django_command` (`ComponentCommand` -> Django management command) | ⏭️ Skip (Django) | citry deliberately adds no Django management-command bridge; Django projects call the installed `citry` binary directly ([`extension_commands.md`](extension_commands.md) section 14) |
 | `routes_to_django` (`URLRoute` -> Django urlpatterns) | ✅ Done | `citry.contrib.django.urlpatterns()`; uses `re_path` where two parameters share a path segment ([`dependencies.md`](dependencies.md) section 9.2) |
 
 </details>
@@ -856,7 +856,7 @@ Ported function by function, on demand. Current state:
 | `format_url` | 🚧 To migrate | Used by `get_script_url`; goes with the dependency extension |
 | `is_generator` | ✅ Done | `citry/util/misc.py`; returns `TypeIs` so type checkers narrow both branches |
 | `hash_comp_cls` | ✅ Done | As the `Component.class_id` metaclass property ([`dependencies.md`](dependencies.md) section 4.1) |
-| `format_as_ascii_table` | ❓ Ambiguous | Only the CLI uses it; goes with the CLI decision |
+| `format_as_ascii_table` | ✅ Done | Ported into `citry/command.py` for the CLI's `list` / `ext list` tables (no trailing whitespace) |
 | `is_str_wrapped_in_quotes`, `get_index` / `get_last_index`, `convert_class_to_namedtuple`, `extract_regex_matches` | ♻️ Superseded | All served Django tag parsing, Context-stack surgery, NamedTuple inputs, or regex-over-HTML; none exist in the citry design |
 | `is_identifier`, `is_nonempty_str`, `default`, `flatten` | ♻️ Superseded | One-liners; citry call sites use the plain Python idiom (`key.isidentifier()`, `or`, comprehensions) |
 | `any_regex_match` / `no_regex_match` | ⏭️ Skip (Django) | staticfiles allow/forbid filters |
@@ -1013,14 +1013,14 @@ Ported function by function, on demand. Current state:
 
 ### `util/command.py` (437 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
 |---|---|---|
-| `ComponentCommand` + `CommandArg`/`CommandArgGroup`/`CommandSubcommand` (declarative, framework-neutral argparse CLI) | ❓ Ambiguous | Already framework-free and feeds `compat/django.py`'s bridge. Port lands with the CLI decision (`commands/` row); citry's `ExtensionCommand` stub is the placeholder |
-| `setup_parser_from_command` (argparse wiring) | ❓ Ambiguous | Same |
-| `style_success` / `style_warning` (ANSI colors) | ❓ Ambiguous | Same |
+| `ComponentCommand` + `CommandArg`/`CommandArgGroup`/`CommandSubcommand` (declarative, framework-neutral argparse CLI) | ✅ Done | The arg dataclasses live in `citry/command.py` with their argparse-aligned names; `ComponentCommand`'s role is filled by the grown `ExtensionCommand` ([`extension_commands.md`](extension_commands.md) section 3) |
+| `setup_parser_from_command` (argparse wiring) | ✅ Done | `build_parser` in `citry/command.py`, paired with the `run` dispatch loop lifted out of the Django bridge ([`extension_commands.md`](extension_commands.md) section 3.2) |
+| `style_success` / `style_warning` (ANSI colors) | ✅ Done | Internal helpers in `citry/command.py`, gated on a color TTY / `NO_COLOR` so piped output stays plain |
 
 </details>
 

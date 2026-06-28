@@ -12,17 +12,38 @@ class Welcome(Component):
         title: str
         messages: list[str]
 
+    # HTML
     def template_data(self, kwargs, slots):
         return {
             "title": kwargs.title,
-            "count": len(kwargs.messages),
+            "messages": kwargs.messages,
         }
 
     template = """
       <div class="card">
         <h1>{{ title }}</h1>
-        <p>You have {{ count }} new messages.</p>
+        <p>You have {{ len(messages[:20]) }} new messages.</p>
       </div>
+    """
+
+    # JS
+    def js_data(self, kwargs, slots):
+        return {"count": len(kwargs.messages)}
+
+    js = """
+      $onComponent(({ els, data }) => {
+        els[0].title = `${data.count} new messages`;
+      });
+    """
+
+    # CSS
+    def css_data(self, kwargs, slots):
+        return {"accent": "tomato"}
+
+    css = """
+      .card {
+        border-top: 3px solid var(--accent);
+      }
     """
 
 # Compose
@@ -458,6 +479,46 @@ Supported hosts:
 Cache backends plug in the same way, through `Citry(cache=...)`:
 `citry.contrib.caches.RedisCache`, `citry.contrib.caches.DiskCache`, and
 `citry.contrib.django.DjangoCache`.
+
+## Command line
+
+Installing Citry puts a `citry` command on your PATH.
+
+Scaffold a new component (no project setup needed):
+
+```bash
+citry create MyButton        # writes my_button.py, ready to edit
+```
+
+You get a ready-to-edit starting point:
+
+```python
+# my_button.py
+class MyButton(Component):
+    class Kwargs:
+        title: str
+
+    def template_data(self, kwargs, slots):
+        return {"title": kwargs.title}
+
+    template = """
+      <div>
+        <h1>{{ title }}</h1>
+      </div>
+    """
+```
+
+The other commands act on a Citry engine. Point them at the one you configured
+with `--app`, given as `module:attribute`:
+
+```bash
+citry --app myproject.app:engine list        # components registered on that engine
+citry --app myproject.app:engine ext list    # extensions installed on it
+```
+
+Extensions can ship their own commands; run one with `citry --app ... ext run
+<extension> <command> [args]`. Run `citry --help` to see everything, and `citry
+--version` to print the installed version.
 
 ## Documentation
 

@@ -144,6 +144,10 @@ ignore = [
 "packages/py/**/tests/benchmark*" = [
     "T201",    # Benchmark scripts print their results
 ]
+"packages/py/citry/citry/commands/*" = [
+    "T201",    # The CLI commands print their output to stdout
+    "ARG002",  # A command's handle receives the parsed options but may use none
+]
 "benchmarks/*" = [
     "T201",    # The comparison runner prints its results
 ]

@@ -9,6 +9,7 @@ from citry import (
     CitryRender,
     Component,
     Extension,
+    ExtensionCommand,
 )
 
 
@@ -433,3 +434,59 @@ class TestComponentConfig:
                 ttl = 3
 
         assert C.Cfg.ttl == 3
+
+
+class TestCommands:
+    def test_no_commands_by_default(self):
+        # The default instance carries only built-in extensions, none of which
+        # declare commands.
+        assert _Citry().commands == {}
+
+    def test_commands_keyed_by_extension(self):
+        class Hello(ExtensionCommand):
+            name = "hello"
+
+            def handle(self, **kwargs): ...
+
+        class Greeter(Extension):
+            name = "greeter"
+            commands = [Hello]
+
+        assert _Citry(extensions=[Greeter]).commands == {"greeter": (Hello,)}
+
+    def test_extensions_without_commands_are_omitted(self):
+        class Hello(ExtensionCommand):
+            name = "hello"
+
+            def handle(self, **kwargs): ...
+
+        class WithCmd(Extension):
+            name = "withcmd"
+            commands = [Hello]
+
+        class WithoutCmd(Extension):
+            name = "withoutcmd"
+
+        # Built-ins come first; only extensions that declare commands appear.
+        assert list(_Citry(extensions=[WithCmd, WithoutCmd]).commands) == ["withcmd"]
+
+    def test_get_extension_command_resolves(self):
+        class Hello(ExtensionCommand):
+            name = "hello"
+
+            def handle(self, **kwargs): ...
+
+        class Greeter(Extension):
+            name = "greeter"
+            commands = [Hello]
+
+        manager = _Citry(extensions=[Greeter]).extensions
+        assert manager.get_extension_command("greeter", "hello") is Hello
+
+    def test_get_extension_command_missing_raises(self):
+        class Greeter(Extension):
+            name = "greeter"
+
+        manager = _Citry(extensions=[Greeter]).extensions
+        with pytest.raises(ValueError, match="not found"):
+            manager.get_extension_command("greeter", "nope")

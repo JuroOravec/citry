@@ -169,7 +169,10 @@ citry keeps the readable full name.)
   `ComponentConfig`). Shortened to `Config`: a user writes `class View:` and the
   manager rebuilds it as a subclass of `Extension.Config`.
 - **`ExtensionManager`** - owned by `Citry`.
-- **`ExtensionCommand`** - the CLI-command base (DJC: `ComponentCommand`).
+- **`ExtensionCommand`** - the CLI-command base (DJC: `ComponentCommand`). The
+  CLI design that builds on it (the command runner, `Citry.commands`
+  aggregation, and the `citry` executable) is
+  [`extension_commands.md`](extension_commands.md).
 
 ---
 

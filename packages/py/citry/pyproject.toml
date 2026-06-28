@@ -34,6 +34,10 @@ dependencies = [
     "typing-extensions>=4.4",
 ]
 
+# The `citry` console script (the CLI entry point); see citry/__main__.py.
+[project.scripts]
+citry = "citry.__main__:main"
+
 [dependency-groups]
 dev = [
     "pytest>=8.3.5",

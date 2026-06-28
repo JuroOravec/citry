@@ -34,6 +34,7 @@ from citry.citry_render import (
     RenderReplacement,
 )
 from citry.citry_template import CitryTemplate
+from citry.command import CommandArg, CommandArgGroup, CommandSubcommand
 from citry.component import Component
 from citry.component_registry import AlreadyRegistered, ComponentRegistry, NotRegistered
 from citry.constness import Const
@@ -103,6 +104,9 @@ __all__ = [
     "CitryRender",
     "CitrySettings",
     "CitryTemplate",
+    "CommandArg",
+    "CommandArgGroup",
+    "CommandSubcommand",
     "Component",
     "ComponentNode",
     "ComponentRegistry",

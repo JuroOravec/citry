@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from citry.citry import Citry
     from citry.citry_context import CitryContext
     from citry.citry_render import CitryRender, RenderPart
+    from citry.command import CommandArg, CommandArgGroup, CommandHandler, CommandSubcommand
     from citry.component import Component
     from citry.nodes import BodyItem, SlotNode
     from citry.slots import Slot
@@ -269,9 +270,13 @@ class ExtensionCommand:
     """
     Base class for an extension's CLI command.
 
-    A stub for now: an extension lists command classes in ``Extension.commands``,
-    and the manager can look one up by name. There is no command *runner* yet;
-    that arrives with the CLI/tooling work. (Extension HTTP routes are a
+    Subclass this, set ``name`` (and usually ``help``), declare any ``arguments``,
+    and define ``handle`` to do the work. A command that only groups
+    ``subcommands`` leaves ``handle`` unset, and the runner prints its help
+    instead of running anything. The declarations are turned into an ``argparse``
+    parser and dispatched by :mod:`citry.command`; an extension lists its command
+    classes in ``Extension.commands`` and a user reaches one as
+    ``citry ext run <extension> <command>``. (Extension HTTP routes are a
     separate surface, ``Extension.urls``.)
     """
 
@@ -279,10 +284,26 @@ class ExtensionCommand:
     """The command name (``citry ext run <extension> <name>``)."""
 
     help: ClassVar[str] = ""
-    """One-line description of the command."""
+    """One-line description of the command, shown in ``--help`` output."""
 
-    def handle(self, *args: Any, **kwargs: Any) -> None:
-        """Run the command. Override in a subclass."""
+    arguments: ClassVar[Sequence[CommandArg | CommandArgGroup]] = ()
+    """Positional arguments and options, declared with :class:`~citry.command.CommandArg`."""
+
+    subcommands: ClassVar[Sequence[type[ExtensionCommand]]] = ()
+    """Nested commands. A command with subcommands usually has no ``handle`` of its own."""
+
+    subparser_input: ClassVar[CommandSubcommand | None] = None
+    """Optional customization of how this command appears when nested under a parent."""
+
+    handle: CommandHandler | None = None
+    """Runs the command, called with the parsed options as keyword arguments.
+    ``None`` (the default) marks a command that only groups subcommands; a real
+    command overrides this with ``def handle(self, **kwargs)``."""
+
+    citry: Citry | None = None
+    """The engine the command runs against, bound by the runner before ``handle``
+    is called (mirrors :attr:`Extension.citry`). A command's ``handle`` reads it
+    to reach the component registry and the installed extensions."""
 
 
 ################################################
@@ -622,6 +643,19 @@ class ExtensionManager:
                 return command
         msg = f"Command {command_name!r} not found in extension {name!r}"
         raise ValueError(msg)
+
+    @property
+    def commands(self) -> dict[str, tuple[type[ExtensionCommand], ...]]:
+        """
+        Every extension's CLI commands, keyed by extension name (read as ``Citry.commands``).
+
+        Built-in extensions come first (they are prepended at construction), then
+        the user's extensions in spec order; only extensions that declare commands
+        appear. Extension names are unique (enforced at construction), so the keys
+        never collide. The CLI reaches a command as
+        ``citry ext run <extension name> <command name>``.
+        """
+        return {extension.name: tuple(extension.commands) for extension in self._extensions if extension.commands}
 
     @property
     def urls(self) -> tuple[URLRoute, ...]:
