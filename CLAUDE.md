@@ -214,7 +214,7 @@ relevant crate's `AGENTS.md`, then its `docs/agent/INDEX.md`, then
   (the root is what the shared venv and CI install from); the cross-comments
   in those files say which sibling to update. The mirroring goes away with
   the uv workspace conversion
-  ([#8](https://github.com/JuroOravec/citry/issues/8)). When changing any
+  ([#8](https://github.com/citry-dev/citry/issues/8)). When changing any
   pinned version, grep for the name across `pyproject.toml` files and CI
   workflows first.
 

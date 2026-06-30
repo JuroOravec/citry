@@ -12,9 +12,9 @@ edition = "2024"
 rust-version = "1.88"
 authors = ["Juro Oravec <juraj.oravec.josefson@gmail.com>"]
 license = "MIT"
-homepage = "https://github.com/JuroOravec/citry"
-documentation = "https://github.com/JuroOravec/citry"
-repository = "https://github.com/JuroOravec/citry"
+homepage = "https://citry.dev"
+documentation = "https://citry.dev"
+repository = "https://github.com/citry-dev/citry"
 
 [workspace.dependencies]
 pyo3 = { version = "0.27.1", features = ["extension-module"] }

@@ -4,7 +4,7 @@ This document plans the continuous-integration and release (CI/CD) setup for
 the citry monorepo: how the `citry_core` (Rust/maturin) and `citry`
 (pure-Python) packages get tested, built, and published to PyPI, and how that
 work folds in the uv-workspace conversion
-([#8](https://github.com/JuroOravec/citry/issues/8)). It is the persistent
+([#8](https://github.com/citry-dev/citry/issues/8)). It is the persistent
 reference for that multi-PR effort, in the same spirit as
 [`citry_migration.md`](citry_migration.md).
 

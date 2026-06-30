@@ -546,7 +546,7 @@ The render-phase number matches the ~50% upstream claim (django-components
   markers ate roughly half the precomputing win.
 - After precomputing, serialization (the marker pass) was the largest single
   remaining cost, ~37% of end-to-end; addressed in
-  [#7](https://github.com/JuroOravec/citry/issues/7) by `mark_html`, a
+  [#7](https://github.com/citry-dev/citry/issues/7) by `mark_html`, a
   single-pass root scan in `citry_html_transform`.
 
 ---

@@ -67,9 +67,10 @@ benchmark = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/JuroOravec/citry/"
-Changelog = "https://github.com/JuroOravec/citry/blob/main/CHANGELOG.md"
-Issues = "https://github.com/JuroOravec/citry/issues"
+Homepage = "https://citry.dev"
+Repository = "https://github.com/citry-dev/citry"
+Changelog = "https://github.com/citry-dev/citry/blob/main/CHANGELOG.md"
+Issues = "https://github.com/citry-dev/citry/issues"
 
 [tool.setuptools.package-data]
 # Non-Python files shipped inside the package: the type-checking marker and

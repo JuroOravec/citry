@@ -103,7 +103,7 @@ In this repo:
   Python dev deps are mirrored between each package's
   `[dependency-groups].dev` and the root extras; any new benchmark deps must
   follow the same mirroring (until the uv workspace conversion,
-  [#8](https://github.com/JuroOravec/citry/issues/8)).
+  [#8](https://github.com/citry-dev/citry/issues/8)).
 
 ---
 

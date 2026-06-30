@@ -37,9 +37,10 @@ dev = ["maturin>=1.10.2", "pytest>=8.3.5"]
 
 # See https://docs.pypi.org/project_metadata/#icons
 [project.urls]
-Homepage = "https://github.com/JuroOravec/citry/"
-Changelog = "https://github.com/JuroOravec/citry/blob/main/packages/py/citry_core/CHANGELOG.md"
-Issues = "https://github.com/JuroOravec/citry/issues"
+Homepage = "https://citry.dev"
+Repository = "https://github.com/citry-dev/citry"
+Changelog = "https://github.com/citry-dev/citry/blob/main/packages/py/citry_core/CHANGELOG.md"
+Issues = "https://github.com/citry-dev/citry/issues"
 Donate = "https://github.com/sponsors/JuroOravec"
 
 [tool.maturin]

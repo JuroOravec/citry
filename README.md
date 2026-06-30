@@ -1,6 +1,6 @@
 # Citry - Refreshingly elegant UI
 
-Citry is a **fast**, **smart**, and **elegant** **frontend framework** for Python that brings the best of **Vue**, **React**,
+Citry is a **smart**, **fast**, and **elegant** **frontend framework** for Python that brings the best of **Vue**, **React**,
 **Django**, and **Jinja**.
 
 ```python

@@ -33,7 +33,7 @@ borrows Django's. That asymmetry is the central reason citry needs its own
 host-neutral watcher (sections 1 and 3).
 
 The browser half is tracked separately in
-[#9](https://github.com/JuroOravec/citry/issues/9) (browser live-reload).
+[#9](https://github.com/citry-dev/citry/issues/9) (browser live-reload).
 
 ---
 
@@ -164,7 +164,7 @@ The browser half is tracked separately in
 6. **Browser refresh is out of scope here.** No client live-reload channel
    exists today, and pushing a page refresh needs net-new design (a dev-only
    WebSocket or SSE endpoint plus an injected script). It is tracked in
-   [#9](https://github.com/JuroOravec/citry/issues/9). Section 9 records the
+   [#9](https://github.com/citry-dev/citry/issues/9). Section 9 records the
    seam it would build on.
 7. **Extras are namespaced** (`watcher-<backend>`), so the optional-dependency
    namespace stays collision-free and leaves room for extension extras
@@ -307,7 +307,7 @@ Responsibilities:
 - **Invalidate.** Call `engine.invalidate_file(p)` per changed path.
 - **Notify.** Invoke the optional `on_reload(paths, reset_classes)` callback,
   the hook a logger or the future browser-refresh feature
-  ([#9](https://github.com/JuroOravec/citry/issues/9)) consumes.
+  ([#9](https://github.com/citry-dev/citry/issues/9)) consumes.
 
 ### 5.3 Why the lazy index is fine for invalidation
 
@@ -417,14 +417,14 @@ watcher-watchdog   = ["watchdog>=4.0"]     # alternate native backend
 Per the repo's mirrored-dependency gotcha, a new pin is added in both the
 package `pyproject.toml` and the mirrored root extras, and the name is grepped
 across `pyproject.toml` files and CI first. (The mirroring goes away with the uv
-workspace conversion, [#8](https://github.com/JuroOravec/citry/issues/8).)
+workspace conversion, [#8](https://github.com/citry-dev/citry/issues/8).)
 
 ---
 
 ## 9. What stays out of scope
 
 - **Browser live-reload** (push a page refresh or asset swap to the browser):
-  [#9](https://github.com/JuroOravec/citry/issues/9). No client channel exists
+  [#9](https://github.com/citry-dev/citry/issues/9). No client channel exists
   today (the client `MutationObserver` only ingests dependency manifests,
   [`client/citry.js`](../../packages/py/citry/citry/extensions/dependencies/client/citry.js)),
   and asset URLs are content-hashed for caching, not live push. The seam it
