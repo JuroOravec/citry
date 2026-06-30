@@ -33,18 +33,14 @@ pub fn extract_comments(source: &str) -> Result<Vec<Comment>, String> {
         // is_raw_string is already set if we saw a prefix
         let in_string = true;
         let string_quote = Some(quote_byte);
-        let string_delimiter_count;
-        let new_i;
-
-        // Triple quote string
-        if i + 2 < bytes.len() && bytes[i + 1] == quote_byte && bytes[i + 2] == quote_byte {
-            string_delimiter_count = 3;
-            new_i = i + 3;
-        } else {
-            // Single quote string
-            string_delimiter_count = 1;
-            new_i = i + 1;
-        }
+        // A triple-quoted string (""" or ''') opens with three quote bytes;
+        // otherwise a single quote opens a normal string.
+        let (string_delimiter_count, new_i) =
+            if i + 2 < bytes.len() && bytes[i + 1] == quote_byte && bytes[i + 2] == quote_byte {
+                (3, i + 3)
+            } else {
+                (1, i + 1)
+            };
         (in_string, string_quote, string_delimiter_count, new_i)
     };
 
