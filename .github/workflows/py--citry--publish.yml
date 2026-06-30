@@ -1,0 +1,128 @@
+# Publish workflow for the citry Python package (pure Python).
+# Builds and publishes citry to PyPI when a `citry@<version>` tag is pushed
+# (the version after `@` must match the package's pyproject version).
+#
+# Release ordering: citry depends on `citry-core>=...`, so when bumping both,
+# publish citry-core first and let it reach PyPI before tagging citry (the smoke
+# job below installs citry, which resolves citry-core from PyPI).
+name: Publish citry to PyPI
+
+on:
+  push:
+    tags:
+      # Tags for this package only, e.g. citry@0.2.0. A bare (no language prefix)
+      # tag means the Python package; see docs/codebase.md "Versioning, tags and releases".
+      - "citry@*"
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_DIR: packages/py/citry
+
+jobs:
+  # Fail fast if the tag's version does not match the package's pyproject
+  # version. Skipped cleanly on manual workflow_dispatch (no version tag).
+  verify-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify tag matches pyproject version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag_version="${GITHUB_REF_NAME#citry@}"
+          pkg_version=$(grep -m1 '^version' "$PROJECT_DIR/pyproject.toml" | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "tag version: $tag_version, pyproject version: $pkg_version"
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::tag '$tag_version' does not match $PROJECT_DIR/pyproject.toml version '$pkg_version'"
+            exit 1
+          fi
+
+  build:
+    needs: verify-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+      # citry is pure Python, so this needs no Rust toolchain: it produces the
+      # sdist and the py3-none-any wheel (both include the client-JS package
+      # data; verified locally).
+      - name: Build sdist and wheel
+        run: uv build --package citry --out-dir dist
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: citry-dist
+          path: dist
+
+  # Install the built wheel in a clean environment and exercise it, so a broken
+  # package (missing modules, missing client-JS data, broken entry point) blocks
+  # the publish instead of shipping.
+  smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: citry-dist
+          path: dist
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install the built wheel and exercise it
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "$(ls dist/*.whl)"
+          python -c "import citry; print('citry', citry.__file__)"
+          citry --help >/dev/null
+          python - <<'PY'
+          import importlib.util
+          from pathlib import Path
+
+          origin = importlib.util.find_spec("citry").origin
+          js = Path(origin).parent / "extensions/dependencies/client/citry.js"
+          assert js.exists(), f"client JS missing from the wheel: {js}"
+          print("client JS present:", js)
+          PY
+
+  release:
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch' }}
+    needs: [verify-version, build, smoke]
+    # Trusted Publishing target. Configure a PyPI publisher for this repo, the
+    # workflow file py--citry--publish.yml, and the environment 'pypi'.
+    environment: pypi
+    permissions:
+      # OIDC token for Trusted Publishing (no stored secret) and the attestation
+      id-token: write
+      # Generate the build-provenance attestation
+      attestations: write
+      # Create the GitHub Release
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: citry-dist
+          path: dist
+      - name: Generate build provenance attestation
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: "dist/*"
+      # Trusted Publishing (OIDC): no token. PyPI verifies the workflow's OIDC
+      # identity against the configured publisher.
+      - name: Publish to PyPI
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+      - name: Create GitHub Release
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" --generate-notes

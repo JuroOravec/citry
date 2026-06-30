@@ -1,5 +1,11 @@
 # Release notes
 
+## v0.1.0
+
+_30 Jun 2026_
+
+Initial release.
+
 ## 2025-12-21
 
 Initial commit.
