@@ -18,8 +18,8 @@ rely on. A directory that holds component modules but is not importable raises a
 clear error rather than guessing.
 
 Triggered from ``Citry`` (the ``autodiscover`` setting runs it once on first
-use, and ``Citry.autodiscover()`` runs it on demand); this module only provides
-the mechanics and depends on nothing inside citry.
+use, and ``Citry.autodiscover()`` runs it on demand); this module provides just
+the discovery mechanics (its only citry dependency is the shared logger).
 """
 
 from __future__ import annotations
@@ -28,6 +28,8 @@ import sys
 from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from citry.util.logger import logger
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -51,8 +53,10 @@ def import_component_modules(dirs: Sequence[Path]) -> list[str]:
     on the Python import path.
     """
     module_names = find_component_modules(dirs)
+    logger.debug("Autodiscovery found %d component module(s) under %d dir(s)", len(module_names), len(dirs))
     for module_name in module_names:
         already_loaded = module_name in sys.modules
+        logger.debug("Importing component module %s", module_name)
         module = import_module(module_name)
         if already_loaded:
             _register_existing_components(module)

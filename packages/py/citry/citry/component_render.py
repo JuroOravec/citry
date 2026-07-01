@@ -61,6 +61,7 @@ from citry.util.exception import (
     set_template_origin_error_message,
     set_template_position_error_message,
 )
+from citry.util.logger import is_tracing, trace_component_msg, trace_node_msg
 from citry.util.misc import is_generator, to_dict
 from citry_core.template_parser import compile_template, parse_template
 
@@ -510,6 +511,17 @@ def _render_one(
         provides=provides,
     )
 
+    # Trace this component's own render (its children render later, deferred).
+    # The ancestor path is O(depth), so build it only when TRACE is enabled.
+    if is_tracing():
+        trace_component_msg(
+            "RENDER",
+            type(component).__name__,
+            component.id,
+            component_path=_component_path(component),
+            slot_fills=component.raw_slots,
+        )
+
     # 2. Attach the per-component extension configs (eg `component.view`,
     #    AKA `component.<ext.name>`), then run on_component_input.
     #    NOTE: the typed component.kwargs / slots are already built in __init__,
@@ -880,10 +892,13 @@ def _render_body(body: list[BodyItem], context: CitryContext) -> list[RenderPart
     happens in ``CitryRender.serialize()``.
     """
     parts: list[RenderPart] = []
+    tracing = is_tracing()  # hoisted: one level check per body walk, not per node
     for item in body:
         if isinstance(item, str):
             parts.append(item)
             continue
+        if tracing:
+            trace_node_msg("RENDER", type(item).__name__, getattr(item, "position", None))
         try:
             part = item.render(context)
         except Exception as err:

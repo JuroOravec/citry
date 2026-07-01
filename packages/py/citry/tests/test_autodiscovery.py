@@ -1,6 +1,7 @@
 """Tests for component-module autodiscovery."""
 
 import importlib
+import logging
 import sys
 from pathlib import Path
 from textwrap import dedent
@@ -200,6 +201,18 @@ class TestAutodiscoverMethod:
         # (re-registering the same class is a no-op).
         app.autodiscover()
         assert app.has("card")
+
+    def test_emits_debug_logs(self, project, caplog):
+        _build_app(project, "m_log", autodiscover=False)
+        project("m_log/components/card.py", _component("m_log", "Card"))
+        app = _load_app("m_log")
+
+        with caplog.at_level(logging.DEBUG, logger="citry"):
+            app.autodiscover()
+
+        msgs = [r.getMessage() for r in caplog.records if r.name == "citry"]
+        assert any(m.startswith("Autodiscovery found") for m in msgs)
+        assert any(m.startswith("Importing component module") and "m_log.components.card" in m for m in msgs)
 
     def test_explicit_dirs_argument(self, project):
         # autodiscover(dirs=...) imports an extra location without disabling the

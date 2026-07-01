@@ -75,6 +75,7 @@ from citry.constness import Const, const_value, is_const
 from citry.slots import Slot
 from citry.util.exception import add_slot_to_error_message
 from citry.util.html import escape
+from citry.util.logger import trace_component_msg
 from citry_core.safe_eval import compile_expr
 
 if TYPE_CHECKING:
@@ -1095,6 +1096,16 @@ class SlotNode(Node):
         name, required, data = self._resolve_props(context)
         fills = component.raw_slots
         fill = fills.get(name)
+
+        # Trace the slot render. All args are cheap, so call directly; the
+        # helper itself skips the work when TRACE is off.
+        trace_component_msg(
+            "RENDER_SLOT",
+            type(component).__name__,
+            component.id,
+            slot_name=name,
+            slot_fills=fills,
+        )
 
         # The slot's own body, as a Slot: the fallback handle when a fill
         # exists, the rendered content when none does.

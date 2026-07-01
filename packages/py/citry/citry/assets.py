@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from citry.citry_template import CitryTemplate
+from citry.util.logger import logger
 from citry.util.misc import get_module_info
 
 if TYPE_CHECKING:
@@ -192,7 +193,9 @@ def _load_pair(
     if file_val is not None:
         path = resolve_asset_file(file_val, comp_cls)
         comp_cls.citry._register_component_file(path, comp_cls)
-        return path.read_text(encoding="utf8"), path
+        content = path.read_text(encoding="utf8")
+        logger.debug("Loaded %s for component %s from %s", file_attr, comp_cls.__name__, path)
+        return content, path
 
     return None, None
 

@@ -844,7 +844,7 @@ the dependency extension, the CLI).
 
 Ported function by function, on demand. Current state:
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
@@ -890,12 +890,12 @@ Ported function by function, on demand. Current state:
 
 ### `util/logger.py` (108 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
 |---|---|---|
-| `django_components` logger + `trace` / `trace_component_msg` render tracing | 🚧 To migrate | citry has no logging story yet. A plain `logging.getLogger("citry")` plus render-trace helpers is a small, self-contained port |
+| `django_components` logger + `trace` / `trace_component_msg` render tracing | ✅ Done | `citry/util/logger.py`: `logging.getLogger("citry")` plus a TRACE level (5, below DEBUG) and `trace` / `trace_component_msg` / `trace_node_msg` / `is_tracing`. Wired to trace each component, slot, and node as it renders (guarded so TRACE-off costs the hot path only a cached level check; per-node tracing was benchmarked to confirm no measurable penalty when off), plus debug logs for asset loading and autodiscovery |
 
 </details>
 

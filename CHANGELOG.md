@@ -1,5 +1,18 @@
 # Release notes
 
+## v0.2.0
+
+### Feat
+
+- Citry now logs through the standard `logging` module, under the `"citry"`
+  logger, with a `TRACE` level (5, below `DEBUG`). The logger traces each component,
+  slot, and node as it renders. Turn it on to debug a render:
+
+  ```python
+  import logging
+  logging.getLogger("citry").setLevel(5)
+  ```
+
 ## v0.1.0
 
 _30 Jun 2026_
