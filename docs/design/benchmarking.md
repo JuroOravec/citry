@@ -89,12 +89,10 @@ In this repo:
   equality assert before timing, and the release-build warning (a debug
   `citry_core` build makes serialization ~12x slower and invalidates every
   number).
-- **`packages/py/citry_core/tests/benchmark.py`** and **`benchmark_eval.py`**:
-  micro-benchmarks of the Rust HTML transformer and of `safe_eval` dispatch.
-  Different layer (citry_core primitives, not component rendering); they stay
-  as they are.
-- **`old_djccore_benchmark_eval.py`** (repo root): the djc-core ancestor of
-  `benchmark_eval.py`, kept for reference.
+- **`packages/py/citry_core/tests/benchmark_html_transform.py`** and
+  **`benchmark_safe_eval.py`**: micro-benchmarks of the Rust HTML transformer
+  and of `safe_eval` dispatch. Different layer (citry_core primitives, not
+  component rendering).
 - **The vendoring pattern**: `packages/py/citry/_djc_reference/` and
   `packages/py/citry/tests/_djc_tests/` already hold DJC material copied into
   this repo for porting work. Vendoring the DJC benchmark files continues an

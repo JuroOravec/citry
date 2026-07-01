@@ -262,6 +262,25 @@ camelCase acceptance (`fontSize`) is deliberately not adopted (DJC parity,
 one less transform). Property values may be `int` (rendered bare,
 `width: 100`, DJC parity); no unit is auto-appended.
 
+### 3.4 Escaping: a literal `c-` attribute name
+
+Because `c-` is reserved for the framework, an attribute name that starts with
+`c-` is normally handled as a directive. To emit a *literal* `c-`-prefixed
+attribute, add one extra `c-` segment: the compiler always strips **exactly
+one** leading `c-`, and if what remains still starts with `c-`, it is a literal
+name rather than a directive (its value is still evaluated as usual).
+
+| Written | Rendered |
+|---|---|
+| `c-foo="'bar'"` | `foo="bar"` (a directive: one `c-` stripped, value evaluated) |
+| `c-c-foo="'bar'"` | `c-foo="bar"` (literal `c-foo`) |
+| `c-c-c-foo="'bar'"` | `c-c-foo="bar"` (literal `c-c-foo`) |
+| `c-c-bind="'lit'"` | `c-bind="lit"` (literal `c-bind`, not a spread) |
+
+The common use is a framework "bridge" attribute: `c-:class="expr"` strips one
+`c-` and emits `:class="..."`, which Vue or Alpine then reads. Keys inside a
+`c-bind` mapping are always literal and never get this treatment.
+
 ---
 
 ## 4. The merge model

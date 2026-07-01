@@ -12,6 +12,7 @@ syntax is the same in every language Citry targets; only the code inside
 ## Contents
 
 - [The two rules](#the-two-rules)
+- [Everything at once](#everything-at-once)
 - [Template expressions](#template-expressions)
 - [Dynamic attributes](#dynamic-attributes)
 - [Class and style attributes](#class-and-style-attributes)
@@ -45,6 +46,37 @@ Citry extends HTML with two rules:
 ```
 
 If you know HTML, you already know most of Citry.
+
+## Everything at once
+
+A single tag can mix all the attribute kinds:
+
+```html
+<c-Card
+  id="intro"
+  c-class="theme_class"
+  c-disabled="not user.is_active"
+  c-bind="extra_attrs"
+  c-:class="alpine_binding"
+  c-body="<>
+    <p>Once upon a time</p>
+    <p>in a land far, far away.</p>
+  </>"
+/>
+```
+
+Line by line:
+
+- `id="intro"` is a plain **static** attribute.
+- `c-class="theme_class"` is a **dynamic** attribute: the value is evaluated as
+  an expression.
+- `c-disabled="not user.is_active"` is a **dynamic boolean**: a `True` result
+  adds the bare attribute, `False` or `None` drops it.
+- `c-bind="extra_attrs"` **spreads** a dict of attributes onto the tag.
+- `c-:class="alpine_binding"` writes a **literal `:class`** attribute (Citry
+  strips one leading `c-`), which a client framework like Vue or Alpine reads.
+- `c-body="<>...</>"` passes a **nested template** as the value, rendered against
+  the same context.
 
 ## Template expressions
 

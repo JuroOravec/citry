@@ -567,12 +567,12 @@ pipeline (`CitryRender` parts + `CitryContext.extra`).
 
 ### `types.py` (7 lines)
 
-<details open>
+<details>
 <summary>Features</summary>
 
 | Feature | Status | Notes |
 |---|---|---|
-| `css` / `js` / `django_html` annotated string aliases (IDE syntax highlighting) | 🚧 To migrate | Trivial, but flag: `django_html` needs a citry name (`html`? `citry_html`?) and editor plugins must know it |
+| `css` / `js` / `django_html` annotated string aliases (IDE syntax highlighting) | ♻️ Superseded | Decided against: the source language is declared with `template_lang` / `js_lang` / `css_lang` string attributes instead (no import, composes with the pluggable asset compiler), and editor support comes from the citry language server, not typed aliases. Full reasoning and prior art in [`source_languages.md`](source_languages.md) |
 
 </details>
 
