@@ -1,0 +1,49 @@
+# Weekly check that citry's declared Python-version support has not drifted from
+# the versions still supported upstream. Opens a single tracking issue on drift.
+# Run scripts/supported_versions.py locally (check / generate) to see the detail.
+name: Check supported Python versions
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays, 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      # The script is pure standard library, so it needs no install step.
+      - name: Check supported Python versions
+        id: check
+        run: |
+          set +e
+          python scripts/supported_versions.py check > report.txt 2>&1
+          echo "status=$?" >> "$GITHUB_OUTPUT"
+          cat report.txt
+      - name: Open a tracking issue on drift
+        if: steps.check.outputs.status == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Supported Python versions need updating"
+          # De-dupe: skip if an open issue with this title already exists.
+          open=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search "\"$title\" in:title" --json number --jq 'length')
+          if [ "$open" -gt 0 ]; then
+            echo "An open tracking issue already exists; nothing to do."
+            exit 0
+          fi
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file report.txt
+      - name: Fail the run if the check errored
+        if: steps.check.outputs.status == '2'
+        run: |
+          echo "::error::supported_versions.py could not fetch upstream data"
+          exit 1
