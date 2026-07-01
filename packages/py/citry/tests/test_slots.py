@@ -237,3 +237,233 @@ class TestNormalizeSlotFills:
         fills = normalize_slot_fills({"body": Hello()})
         part = fills["body"]()
         assert isinstance(part, CitryRender)
+
+
+class TestDeclaredSlotCheck:
+    """
+    The definition-time check comparing a component's own ``<c-slot>`` tags
+    against its ``Slots`` schema (docs/design/slots.md section 9.5). Runs at
+    first render, and only when ``Slots`` is declared (a closed schema).
+    """
+
+    def test_slot_not_in_schema_is_a_dead_slot(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-slot name="ghost"/>'
+
+            class Slots:
+                header: str = ""
+
+        with pytest.raises(RuntimeError, match=r"does not declare 'ghost', so no caller can fill it"):
+            str(Card())
+
+    def test_dead_slot_suggests_a_close_name(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-slot name="heder"/>'
+
+            class Slots:
+                header: str = ""
+
+        with pytest.raises(RuntimeError, match=r"Did you mean 'header'\?"):
+            str(Card())
+
+    def test_required_slot_with_optional_field_is_allowed(self):
+        # `required` on <c-slot> and a default on the Slots field are orthogonal
+        # (the fill may be passed from outside), so the combination is allowed:
+        # it declares "side", so the dead-slot check does not fire.
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-slot name="side" required/>'
+
+            class Slots:
+                side: str = "default text"  # optional: has a default
+
+        assert "passed" in str(Card(slots={"side": "passed"}))
+
+    def test_matching_declaration_is_fine(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-slot name="body"/>'
+
+            class Slots:
+                body: str = ""
+
+        str(Card())  # does not raise
+
+    def test_required_slot_required_in_schema_is_fine(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-slot name="x" required/>'
+
+            class Slots:
+                x: str  # required: no default
+
+        assert "filled" in str(Card(slots={"x": "filled"}))
+
+    def test_no_slots_class_skips_the_check(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            # Any slot name is legitimate without a schema, so no dead-slot error.
+            template = '<c-slot name="anything"/>'
+
+        assert "x" in str(Card(slots={"anything": "x"}))
+
+    def test_bare_default_slot_needs_a_default_field(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = "<c-slot/>"  # the default slot, named "default"
+
+            class Slots:
+                header: str = ""
+
+        with pytest.raises(RuntimeError, match=r"does not declare 'default'"):
+            str(Card())
+
+    def test_default_slot_declared_is_fine(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = "<c-slot/>"
+
+            class Slots:
+                default: str = ""
+
+        str(Card())  # does not raise
+
+    def test_dynamic_slot_name_is_not_flagged(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-slot c-name="which"/>'
+
+            class Slots:
+                real: str = ""
+
+            def template_data(self, kwargs, slots):
+                return {"which": "real"}
+
+        # A dynamic name is not a static declaration, so the check ignores it; at
+        # render it resolves to the declared "real" slot.
+        str(Card())  # does not raise
+
+    def test_slot_nested_in_control_flow_is_still_checked(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-if cond="True"><c-slot name="ghost"/></c-if>'
+
+            class Slots:
+                header: str = ""
+
+        with pytest.raises(RuntimeError, match=r"does not declare 'ghost'"):
+            str(Card())
+
+
+class TestSlotFieldDefaultFill:
+    """
+    A non-``None`` default on a typed ``Slots`` field is used as the slot's fill
+    when the caller omits it (docs/design/slots.md section 5): it satisfies a
+    ``required`` slot and renders in place. A passed fill wins over it, and a
+    ``None`` default (the "optional" marker) leaves the in-template body as the
+    fallback.
+    """
+
+    def test_required_slot_uses_field_default_when_omitted(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-slot name="side" required/>'
+
+            class Slots:
+                side: str = "DEFAULT"
+
+        assert str(Card()) == "DEFAULT"
+
+    def test_passed_fill_overrides_field_default(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-slot name="side" required/>'
+
+            class Slots:
+                side: str = "DEFAULT"
+
+        assert str(Card(slots={"side": "FILL"})) == "FILL"
+
+    def test_optional_slot_uses_field_default_when_omitted(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-slot name="side"/>'
+
+            class Slots:
+                side: str = "DEFAULT"
+
+        assert str(Card()) == "DEFAULT"
+
+    def test_none_default_falls_through_to_the_body(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-slot name="side">BODY</c-slot>'
+
+            class Slots:
+                side: str | None = None
+
+        assert str(Card()) == "BODY"
+
+    def test_required_slot_with_none_default_still_raises(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-slot name="side" required/>'
+
+            class Slots:
+                side: str | None = None
+
+        with pytest.raises(RuntimeError, match=r"required, but no fill was provided"):
+            str(Card())
+
+    def test_field_default_wins_over_in_template_body(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-slot name="side">BODY</c-slot>'
+
+            class Slots:
+                side: str = "DEFAULT"
+
+        assert str(Card()) == "DEFAULT"
+
+    def test_no_slots_class_keeps_the_body_fallback(self):
+        c = Citry()
+
+        class Card(Component):
+            citry = c
+            template = '<c-slot name="side">BODY</c-slot>'
+
+        assert str(Card()) == "BODY"

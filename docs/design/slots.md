@@ -329,18 +329,23 @@ Django scaffolding removed:
    data** (static attrs as strings, `c-*` attrs evaluated, `c-bind` spread;
    last write wins, left to right). Data resolves per render of the slot
    site, so a slot inside `<c-for>` passes per-iteration data.
-2. **Look up** the name in the rendering component's slots
-   (`context.component.raw_slots`).
-3. **On hit:** wrap the slot's own body and the current context as a fallback
-   `Slot` (3.3) and invoke the fill's Slot with
-   `SlotContext(data=resolved_data, fallback=fallback)`. The returned
-   part is this node's render result; if it is a `CitryRender` from a
+2. **Look up** the name in the rendering component's fills
+   (`context.component.raw_slots`). When the caller passed no fill and the
+   component has a typed `Slots` class with a *non-`None`* default for that slot,
+   that default becomes the fill (normalized like any passed fill), so an omitted
+   slot uses its schema default and a `required` slot is satisfied. A `None`
+   default (the "optional" marker) leaves the slot unfilled. The precedence is:
+   passed fill, then a non-`None` field default, then the in-template body.
+3. **On hit** (a passed fill, or a non-`None` field default): wrap the slot's
+   own body and the current context as a fallback `Slot` (3.3) and invoke the
+   fill's Slot with `SlotContext(data=resolved_data, fallback=fallback)`. The
+   returned part is this node's render result; if it is a `CitryRender` from a
    different context, `_render_body`'s existing merge seam copies its
    dependencies (unchanged behavior).
-4. **On miss:** render the slot's own body (the fallback) against the current
-   context, exactly as if the `<c-slot>` tags were not there. If `required`
-   resolved truthy, raise instead, including DJC's `difflib`-based "did you
-   mean" hint over the available fill names
+4. **On miss** (no fill and no non-`None` field default): render the slot's own
+   body (the fallback) against the current context, exactly as if the `<c-slot>`
+   tags were not there. If `required` resolved truthy, raise instead, including
+   DJC's `difflib`-based "did you mean" hint over the available fill names
    ([`slots.py:865`](../../packages/py/citry/_djc_reference/slots.py)).
 5. **Fire `on_slot_rendered`** (section 7.1) and apply a replacement result
    if an extension returns one.
@@ -556,6 +561,43 @@ are internal and free to change. For the slot subsystem that means:
   `collect_fills_from_body` (collection machinery behind
   `Node.collect_fills`).
 
+### 9.5 The slot contract: a closed set, or any
+
+A component's `Slots` class is a *closed* contract, and the choice is binary:
+
+- **No `Slots` class** (the default, `Slots = None`): the component accepts
+  *any* fills. The parser's `allowed_slots` is `None` (no restriction), and at
+  render the raw fills pass through untyped.
+- **A declared `Slots` class**: its fields are the *only* fillable slots. In a
+  parent template, a `<c-fill>` naming an undeclared slot fails and a missing
+  no-default slot fails (section 4.3, [`grammar.md`](grammar.md) rules 7-8); at
+  render, `Slots(**fills)` (an auto-dataclass) rejects an unknown fill and
+  requires the no-default ones. A field with no default is a required slot; one
+  with a default is optional. This mirrors `Kwargs` exactly.
+
+There is deliberately no *known-plus-extra* mode (declare `header` and `footer`
+yet also accept arbitrary others). Omit `Slots` to accept anything; declare it
+to fix the full set. A dynamic fill name (`<c-fill c-name="expr">`) only defers
+the per-name check to render, where a declared `Slots` still rejects a resolved
+name that is not a field, so it does not open the set. (Attributes have `c-bind`
+as a runtime spread hatch; slots have no equivalent.) The rejected
+known-plus-extra alternative is in section 13.
+
+**The closedness is load-bearing for validation.** Because a declared `Slots` is
+the *complete* set of fillable slots, the component's own template can be checked
+against it when it first compiles: a `<c-slot name="X">` whose `X` is not a
+declared slot can never be filled by any caller, so it is a **dead slot**, a
+definition error. A slot's `required` flag and a default on the matching `Slots`
+field coexist: the default is used as the fill when the caller omits it (section
+5), so a `required` slot is satisfied, and the combination is allowed, not
+flagged.
+
+The check runs once, when the component first compiles, and only when `Slots` is
+declared. An omitted `Slots` has no set to check against, so it is skipped (and
+if a known-plus-extra mode is ever added, the dead-slot check must downgrade to a
+completion hint for those components, since a non-schema slot would then be
+fillable).
+
 ---
 
 ## 10. Prop templates vs slots
@@ -710,6 +752,17 @@ The repo rule is dedupe-preserving-first-seen-order; fix while in
   real need for a component whose default slot must carry a semantic name
   *and* be implicitly fillable; such a component can rename its slot or
   accept explicit fills, so the cost is considered acceptable.
+- **Known-plus-extra slots** (declare some slots but also accept arbitrary
+  others). Rejected: it would need a runtime container that stores the extras (a
+  plain dataclass cannot), plus a third `allowed_slots` parser state beyond
+  `None` (any) and `Some(list)` (closed), and it weakens the two guarantees the
+  closed set exists for (rejecting an unknown or missing fill in the parent
+  template, and the definition-time dead-slot check in 9.5). The binary model
+  (omit `Slots` for any, declare it for a closed set) covers the cases seen so
+  far. What would falsify this: a concrete component that needs a few typed,
+  required slots *and* an open-ended set of dynamically named ones; the seam is
+  the `allowed_slots` third state, and the dead-slot check would then treat a
+  non-schema slot as a completion hint rather than an error.
 - **Scanning only same-owner renders, with slot renders specially tagged**
   (instead of section 8's descend-everywhere). Rejected: a tag on
   `CitryRender` adds state to carry and keep correct, while

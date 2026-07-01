@@ -72,7 +72,7 @@ from citry.citry_context import CitryContext
 from citry.citry_element import CitryElement
 from citry.citry_render import CitryRender, DeferredComponent, _render_value
 from citry.constness import Const, const_value, is_const
-from citry.slots import Slot
+from citry.slots import Slot, normalize_slot_fills
 from citry.util.exception import add_slot_to_error_message
 from citry.util.html import escape
 from citry.util.logger import trace_component_msg
@@ -1096,6 +1096,17 @@ class SlotNode(Node):
         name, required, data = self._resolve_props(context)
         fills = component.raw_slots
         fill = fills.get(name)
+
+        # No fill passed: fall back to a default on the typed `Slots` field, used
+        # as the slot's fill (docs/design/slots.md section 9.5). `getattr` returns
+        # that default here because the caller passed nothing for `name`; a `None`
+        # default (or a dynamic name that is not a field) yields no fill, so the
+        # in-template body below stays the fallback and a required slot still
+        # raises. A passed fill always wins over the default.
+        if fill is None and type(component).Slots is not None:
+            default = getattr(component.slots, name, None)
+            if default is not None:
+                fill = normalize_slot_fills({name: default}, component_name=type(component).__name__).get(name)
 
         # Trace the slot render. All args are cheap, so call directly; the
         # helper itself skips the work when TRACE is off.

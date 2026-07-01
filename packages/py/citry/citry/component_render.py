@@ -34,13 +34,14 @@ its own props and slots, never an inherited context.
 from __future__ import annotations
 
 from contextvars import ContextVar
+from difflib import get_close_matches
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from citry.assets import load_template
 from citry.citry_context import CitryContext
 from citry.citry_element import CitryElement
 from citry.citry_render import CitryRender, DeferredComponent
-from citry.citry_template import CitryTemplate
+from citry.citry_template import CitryTemplate, DeclaredSlot
 from citry.constness import const_value, extract_const_vars, precompute_const_parts
 from citry.nodes import (
     ComponentNode,
@@ -62,7 +63,7 @@ from citry.util.exception import (
     set_template_position_error_message,
 )
 from citry.util.logger import is_tracing, trace_component_msg, trace_node_msg
-from citry.util.misc import is_generator, to_dict
+from citry.util.misc import get_fields, is_generator, to_dict
 from citry_core.template_parser import compile_template, parse_template
 
 if TYPE_CHECKING:
@@ -796,10 +797,42 @@ def _get_compiled_template(comp_cls: type[Component]) -> CitryTemplate | None:
     if template.generate is None:
         try:
             _compile_template(template, comp_cls.citry._tag_rules())
+            _check_declared_slots(comp_cls, template)
         except Exception as err:
             set_template_origin_error_message(err, template.origin)
             raise
     return template
+
+
+def _check_declared_slots(comp_cls: type[Component], template: CitryTemplate) -> None:
+    """
+    Check a component's own ``<c-slot>`` tags against its ``Slots`` schema.
+
+    Runs once, at first compile, and only when the component declares a closed
+    ``Slots`` schema (an omitted ``Slots`` accepts any fills, so there is nothing
+    to check; see docs/design/slots.md section 9.5). It catches a *dead slot*: a
+    ``<c-slot name="X">`` whose ``X`` is not a declared slot, so no caller can
+    ever fill it. Dynamic-name slots (``<c-slot c-name="...">``) are not in
+    ``declared_slots``, so they are never flagged.
+
+    A slot's ``required`` flag and a default on the matching ``Slots`` field are
+    orthogonal (the fill may be passed from outside, or omitted), so that
+    combination is deliberately not flagged.
+    """
+    slot_specs = get_fields(comp_cls.Slots)
+    if slot_specs is None:
+        return
+    declared = {spec.name for spec in slot_specs}
+    for slot in template.declared_slots:
+        if slot.name not in declared:
+            close = get_close_matches(slot.name, sorted(declared), n=1, cutoff=0.7)
+            hint = f" Did you mean {close[0]!r}?" if close else ""
+            msg = (
+                f"Component {comp_cls.__name__!r} renders <c-slot name={slot.name!r}> "
+                f"(line {slot.line}) but its Slots class does not declare {slot.name!r}, so no "
+                f"caller can fill it.{hint} Add {slot.name!r} to Slots, or remove the slot."
+            )
+            raise RuntimeError(msg)
 
 
 def _compile_template(
@@ -826,6 +859,11 @@ def _compile_template(
     """
     ast = parse_template(template.source, user_rules=user_rules)
     template.used_vars = frozenset(token.content for token in ast.used_variables)
+    # The static <c-slot> declarations, kept for `_check_declared_slots` (the
+    # caller runs it, since it has the component class and thus its Slots).
+    template.declared_slots = tuple(
+        DeclaredSlot(slot.token.content, slot.token.line_col[0], slot.token.line_col[1]) for slot in ast.slots
+    )
     code = compile_template(ast)
 
     # Build the namespace for exec. "source" is the original template string,

@@ -19,13 +19,25 @@ docs/design/asset_loading.md section 4.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
     from citry.nodes import BodyItem
+
+
+class DeclaredSlot(NamedTuple):
+    """
+    A ``<c-slot>`` the template declares, kept for checking the component's own
+    template against its ``Slots`` schema (see docs/design/slots.md section 9.5):
+    the static slot name and its (line, column) for error messages.
+    """
+
+    name: str
+    line: int
+    col: int
 
 
 @dataclass(slots=True)
@@ -48,6 +60,9 @@ class CitryTemplate:
             in nested tags (the parse-time ``Template.used_variables``). Empty
             until compiled. The ``Const`` optimization keys its cache only on
             these.
+        declared_slots: Internal. The ``<c-slot>`` tags the template declares
+            (static names only), used to check the component against its
+            ``Slots`` schema. Empty until compiled.
 
     """
 
@@ -58,6 +73,7 @@ class CitryTemplate:
     # The compiled form, populated by component_render on first render.
     generate: Callable[[], list[BodyItem]] | None = None
     used_vars: frozenset[str] = field(default_factory=frozenset)
+    declared_slots: tuple[DeclaredSlot, ...] = ()
 
     def __repr__(self) -> str:
         compiled = "compiled" if self.generate is not None else "not compiled"

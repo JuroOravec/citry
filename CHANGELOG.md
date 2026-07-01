@@ -13,6 +13,17 @@
   logging.getLogger("citry").setLevel(5)
   ```
 
+### Fix
+
+- A default value for a slot set at `Component.Slot.<attr>` is now correctly used.
+
+### Refactor
+
+- Citry now raises error when template contains `<c-slot name="X">`, but `Component.Slots` omits `X`.
+
+  A component without a `Slots` class accepts any fills
+  and is unaffected.
+
 ## v0.1.0
 
 _30 Jun 2026_
