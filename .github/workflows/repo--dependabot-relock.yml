@@ -1,0 +1,119 @@
+# Keep uv.lock in sync on Dependabot PRs.
+#
+# Dependabot's `pip` ecosystem bumps a dependency in a package's pyproject.toml
+# but does not touch uv.lock, so the `Check` gate fails at `uv sync --locked`
+# ("the lockfile needs to be updated"). This workflow runs `uv lock` on a
+# Dependabot PR and pushes the refreshed uv.lock back to the PR branch, so the
+# gate goes green without a human re-locking by hand.
+#
+# Auth: the push must use a token that is NOT the default GITHUB_TOKEN, because a
+# GITHUB_TOKEN push deliberately does not re-trigger workflows (so `Check` would
+# stay red). In order of preference:
+#   1. An org-owned GitHub App (recommended, not tied to one person's account):
+#      Dependabot secrets RELOCK_APP_ID + RELOCK_APP_PRIVATE_KEY.
+#   2. A fine-grained PAT (simpler, but personal and expiring):
+#      Dependabot secret RELOCK_TOKEN.
+#   3. Neither: the workflow comments on the PR with the manual `uv lock`
+#      command and fails, so nobody is silently blocked.
+# All three are stored as **Dependabot** secrets (not Actions secrets): a
+# Dependabot-triggered run can only read Dependabot secrets. Setup: docs/codebase.md.
+
+name: Dependabot relock
+
+on:
+  pull_request:
+    paths:
+      - "**/pyproject.toml"
+
+permissions:
+  contents: read # the push uses the App/PAT token, not GITHUB_TOKEN
+  pull-requests: write # for the fallback comment via GITHUB_TOKEN
+
+jobs:
+  relock:
+    # Only Dependabot PRs; a human who bumps a dep re-locks in their own commit.
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      # Mint a short-lived token from the org GitHub App, if it is configured.
+      # continue-on-error so a missing/misconfigured App falls through to the
+      # PAT, then to the comment fallback, instead of hard-failing here.
+      - name: Mint GitHub App token
+        id: app_token
+        continue-on-error: true
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELOCK_APP_ID }}
+          private-key: ${{ secrets.RELOCK_APP_PRIVATE_KEY }}
+
+      - name: Decide whether we can push
+        id: auth
+        env:
+          APP_TOKEN: ${{ steps.app_token.outputs.token }}
+          PAT: ${{ secrets.RELOCK_TOKEN }}
+        run: |
+          if [ -n "$APP_TOKEN" ] || [ -n "$PAT" ]; then
+            echo "can_push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "can_push=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          # The PR's own branch (not the merge ref), authenticated with the
+          # App/PAT token when present so a later push re-triggers the gate.
+          ref: ${{ github.head_ref }}
+          token: ${{ steps.app_token.outputs.token || secrets.RELOCK_TOKEN || github.token }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      # `uv lock` only re-resolves the workspace's single root uv.lock; it does
+      # not build the citry_core extension, so no Rust or submodules are needed.
+      - name: Regenerate uv.lock
+        run: uv lock
+
+      - name: Push the refreshed uv.lock, or advise a manual re-lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if git diff --quiet -- uv.lock; then
+            echo "uv.lock already in sync; nothing to do."
+            exit 0
+          fi
+
+          if [ "${{ steps.auth.outputs.can_push }}" = "true" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add uv.lock
+            git commit -m "chore: sync uv.lock for the dependabot update"
+            git push origin "HEAD:${{ github.head_ref }}"
+            echo "Pushed refreshed uv.lock; the Check gate will re-run."
+            exit 0
+          fi
+
+          # No push token configured: tell a human exactly what to do, once.
+          if gh pr view "$PR" --json comments --jq '.comments[].body' | grep -qF "<!-- relock-manual -->"; then
+            echo "Manual-relock comment already present."
+          else
+            body=$(printf '%s\n' \
+              "<!-- relock-manual -->" \
+              "This PR bumped a dependency in a \`pyproject.toml\`, so \`uv.lock\` is now out of sync and the **Check** gate fails at \`uv sync --locked\`. No relock token is configured, so I could not push the fix automatically." \
+              "" \
+              "To unblock, run on this branch and push:" \
+              "" \
+              '```bash' \
+              "gh pr checkout $PR" \
+              "uv lock" \
+              "git commit -am 'chore: sync uv.lock'" \
+              "git push" \
+              '```' \
+              "" \
+              "To automate this, configure the org GitHub App (or a \`RELOCK_TOKEN\` Dependabot secret): see .github/workflows/repo--dependabot-relock.yml and docs/codebase.md.")
+            gh pr comment "$PR" --body "$body"
+          fi
+          echo "::error::uv.lock is out of sync and no relock token is configured; see the PR comment."
+          exit 1

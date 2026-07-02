@@ -271,9 +271,6 @@ docs = [
     { name = "starlette" },
     { name = "uvicorn" },
 ]
-social-cards = [
-    { name = "playwright" },
-]
 
 [package.dev-dependencies]
 dev = [
@@ -289,14 +286,13 @@ requires-dist = [
     { name = "minify-html", marker = "extra == 'docs'" },
     { name = "packaging", marker = "extra == 'docs'" },
     { name = "pagefind", extras = ["bin"], marker = "extra == 'docs'" },
-    { name = "playwright", marker = "extra == 'social-cards'" },
     { name = "pygments", marker = "extra == 'docs'", specifier = "<2.21" },
     { name = "pymdown-extensions", marker = "extra == 'docs'" },
     { name = "pyyaml", marker = "extra == 'docs'" },
     { name = "starlette", marker = "extra == 'docs'" },
     { name = "uvicorn", marker = "extra == 'docs'" },
 ]
-provides-extras = ["docs", "social-cards"]
+provides-extras = ["docs"]
 
 [package.metadata.requires-dev]
 dev = [
