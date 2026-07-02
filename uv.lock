@@ -219,7 +219,7 @@ provides-extras = ["watcher-watchfiles", "watcher-watchdog"]
 [package.metadata.requires-dev]
 benchmark = [
     { name = "django", marker = "python_full_version >= '3.12'", specifier = "==6.0.6" },
-    { name = "django-components", marker = "python_full_version >= '3.12'", specifier = "==0.151.0" },
+    { name = "django-components", marker = "python_full_version >= '3.12'", specifier = "==0.151.1" },
     { name = "jinja2", specifier = "==3.1.6" },
 ]
 dev = [
@@ -430,9 +430,9 @@ name = "django"
 version = "6.0.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "asgiref", marker = "python_full_version >= '3.12'" },
-    { name = "sqlparse", marker = "python_full_version >= '3.12'" },
-    { name = "tzdata", marker = "python_full_version >= '3.12' and sys_platform == 'win32'" },
+    { name = "asgiref" },
+    { name = "sqlparse" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/78/29/ac41e16097af67066d97a7d5775c5d8e7efc5d0284f6b0a159e07b9adb92/django-6.0.6.tar.gz", hash = "sha256:ad03916ba59523d781ae5c3f631960c23d69a9d9c43cecda52fc23b47e953713", size = 10905525, upload-time = "2026-06-03T13:02:46.503Z" }
 wheels = [
@@ -441,16 +441,16 @@ wheels = [
 
 [[package]]
 name = "django-components"
-version = "0.151.0"
+version = "0.151.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "django", marker = "python_full_version >= '3.12'" },
-    { name = "djc-core", marker = "python_full_version >= '3.12'" },
-    { name = "typing-extensions", marker = "python_full_version >= '3.12'" },
+    { name = "django" },
+    { name = "djc-core" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/01/04/a7479a698747b35dc8f5ff73ffb0c38bb634d75893dd7336adcd51904a1d/django_components-0.151.0.tar.gz", hash = "sha256:256fb059984ea670a1320062bc2a4c80634a15d3718568fc8808185027e4f200", size = 230349, upload-time = "2026-06-03T14:43:48.336Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9f/09/7845ded37f5964ff84c3f4535c5e5b6547bc6a6e3e5d5cb14515236d9040/django_components-0.151.1.tar.gz", hash = "sha256:1546483f8224a3888d192f2712334217c48c5cab9526eabdc8e6543bc8b77aea", size = 230384, upload-time = "2026-06-25T10:38:49.445Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a5/78/62a33aee002cfdf49ceac93e23e87e8b20b864c087ae8b0a9c6b32bf842f/django_components-0.151.0-py3-none-any.whl", hash = "sha256:c0e82c998e4eaa4ca6d2dc02ad08ca1ce1d3ac327972d50d02d3ec985f40bcf6", size = 249368, upload-time = "2026-06-03T14:43:47.041Z" },
+    { url = "https://files.pythonhosted.org/packages/76/4c/a419f1bcda8b6a9828f0c50f788fb322089710c249b0ed59cb79cc827ff9/django_components-0.151.1-py3-none-any.whl", hash = "sha256:fd09a5265cfd9d0bb7023dea45048552b185bdd10b0ab5b43e248b4dcb38daba", size = 249366, upload-time = "2026-06-25T10:38:48.297Z" },
 ]
 
 [[package]]
@@ -556,7 +556,7 @@ name = "exceptiongroup"
 version = "1.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "python_full_version < '3.12'" },
+    { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/79/66800aadf48771f6b62f7eb014e352e5d06856655206165d775e675a02c9/exceptiongroup-1.3.1.tar.gz", hash = "sha256:8b412432c6055b0b7d14c310000ae93352ed6754f70fa8f7c34141f91c4e3219", size = 30371, upload-time = "2025-11-21T23:01:54.787Z" }
 wheels = [
